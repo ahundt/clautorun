@@ -6,9 +6,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are the plugin versions in `.claude-plugin/marketplace.json`; the
 marketplace itself carries a separate `version` field.
 
-## [Unreleased]
+## [1.0.0rc1] - 2026-08-20
 
 ### Fixed
+
+- **A config file that names one thing no longer erases the rest.** The user
+  config tier overlaid a file's value by assignment, so for the settings that
+  hold a dict, naming one key replaced every other key. Two of those dicts make
+  that severe. `default_integrations` is the safety-guard table, so a file
+  adding a single integration of the user's own silently removed all 48 shipped
+  guards — `rm`, `dd if=`, `fdisk`, `bfg` among them — and nothing reported it;
+  a disarmed autorun is indistinguishable from a working one until something is
+  already gone. The two per-harness timeout dicts failed the opposite way: a
+  file naming `gemini` left `CONFIG[key]["claude"]` raising `KeyError` for every
+  harness including `gemini`, and because that failure denies on a tool-gate
+  event, a plausible config file blocked every tool on every harness. Dict
+  settings are now merged onto their declared defaults, so omission means "no
+  opinion" instead of "delete", while naming a key still overrides that key
+  outright. Per-harness lookups additionally resolve through one helper that
+  falls back to a declared value rather than indexing and raising.
 
 - **An unresponsive harness CLI costs one timeout, not one per command.** The
   removal path runs with "never stop at a failure" so that withdrawing from a
@@ -200,8 +216,6 @@ marketplace itself carries a separate `version` field.
   `pytest -m "not real_money"` proves a run collected none of them.
   `tests/test_real_money_gate.py` fails the build if a second copy of the gate
   appears.
-
-## [1.0.0rc1] - 2026-08-15
 
 ### Added
 

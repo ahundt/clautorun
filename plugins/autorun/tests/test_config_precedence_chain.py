@@ -52,7 +52,17 @@ _IMPORT_PROBE = textwrap.dedent(
 @pytest.fixture
 def config_home(tmp_path, monkeypatch):
     monkeypatch.setenv("AUTORUN_HOME", str(tmp_path))
-    return tmp_path
+    # Tests here overlay a file onto the process-wide CONFIG that every other
+    # module imported, so the overlay has to be undone or it leaks out of this
+    # module. It did: a file setting only gemini's timeout left CONFIG holding
+    # 3.25, and test_hook_entry's stdlib-mirror spec test then compared its
+    # hardcoded 4.0 against that, failing several hundred tests later in
+    # whichever order xdist happened to pick. The restore belongs to the
+    # fixture rather than to each test, so a new test cannot forget it.
+    saved = dict(config_module.CONFIG)
+    yield tmp_path
+    config_module.CONFIG.clear()
+    config_module.CONFIG.update(saved)
 
 
 def _write(config_home, payload):
@@ -141,3 +151,87 @@ def test_the_live_config_reflects_the_file_at_import(config_home):
     detail = f"rc={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
     assert result.returncode == 0, detail
     assert result.stdout.strip() == "7", f"the file tier is not applied at import: {detail}"
+
+
+@pytest.mark.parametrize(
+    "setting",
+    ["daemon_client_response_timeouts_seconds", "hook_wrapper_timeouts_seconds"],
+)
+def test_a_partial_harness_dict_does_not_break_every_harness(config_home, setting):
+    """A file may name one harness without disabling the gate for all of them.
+
+    The tier replaces a dict setting rather than merging it, so CONFIG's copy
+    is exactly what the file said. Both per-harness lookups in client.py used
+    to spell their fallback ``timeouts["claude"]`` -- an index into that same
+    replaced dict -- so a file naming only "gemini" raised KeyError for every
+    harness, including "gemini" itself. The outer handler turns that into a
+    daemon-failure response, and for a tool-gate event that response denies,
+    so a plausible config file blocked every tool everywhere.
+
+    The value the user did supply must win, and the harnesses they left out
+    must fall back to the declared default rather than to whatever the file
+    happens to contain.
+    """
+    from autorun import client
+
+    _write(config_home, {setting: {"gemini": 3.25}})
+    config_module.apply_user_config(config_module.CONFIG)
+
+    lookup = (
+        client.daemon_response_timeout_for_cli
+        if setting == "daemon_client_response_timeouts_seconds"
+        else client.client_total_budget
+    )
+    declared = config_module.default_config()[setting]
+
+    assert lookup("gemini") == pytest.approx(
+        3.25 if setting == "daemon_client_response_timeouts_seconds"
+        else max(3.25 - client.CLIENT_BUDGET_MARGIN_SECONDS, 0.1)
+    ), "the harness the file names must get the value it was given"
+
+    for harness in ("claude", "codex"):
+        # Not an exact-value assertion: the point is that an omitted harness
+        # resolves to *something* from the declared defaults instead of raising.
+        assert lookup(harness) > 0, (
+            f"{harness!r} was absent from the file and must fall back to the "
+            f"declared default {declared.get(harness)!r}, not raise"
+        )
+
+
+def test_naming_one_integration_does_not_disarm_the_other_guards(config_home):
+    """A dict setting is merged onto its default, never substituted for it.
+
+    ``default_integrations`` is the safety-guard table: ``rm``, ``dd if=``,
+    ``fdisk``, ``git push`` and 44 more. Overlaying a file value by assignment
+    means a file that names one command *replaces* all 48, so a user adding a
+    single integration of their own silently turns every guard off and nothing
+    reports it. Guards are the feature; losing them by omission is the worst
+    failure this tier can have, and it is indistinguishable from working.
+
+    Merging keeps omission meaning "no opinion" for every dict setting rather
+    than "delete". Naming a key still overrides that key outright, which is how
+    a user deliberately retunes one guard or one harness's timeout.
+    """
+    declared = config_module.default_config()["default_integrations"]
+    assert "rm" in declared, "fixture assumes rm ships as a default guard"
+
+    _write(config_home, {"default_integrations": {"mycmd": {"action": "block"}}})
+    resolved = config_module.apply_user_config(dict(config_module._DEFAULT_CONFIG))
+    integrations = resolved["default_integrations"]
+
+    assert "mycmd" in integrations, "the user's own integration must be added"
+    missing = sorted(set(declared) - set(integrations))
+    assert not missing, (
+        f"a one-entry config file disarmed {len(missing)} shipped guards: {missing[:8]}"
+    )
+
+
+def test_naming_a_key_overrides_exactly_that_key(config_home):
+    """Merge must not degrade into "the file cannot change anything"."""
+    _write(config_home, {"daemon_client_response_timeouts_seconds": {"gemini": 9.5}})
+    resolved = config_module.apply_user_config(dict(config_module._DEFAULT_CONFIG))
+    timeouts = resolved["daemon_client_response_timeouts_seconds"]
+
+    assert timeouts["gemini"] == 9.5, "the named key must take the file's value"
+    declared = config_module.default_config()["daemon_client_response_timeouts_seconds"]
+    assert timeouts["claude"] == declared["claude"], "an unnamed key keeps its default"

@@ -1232,6 +1232,42 @@ def default_config() -> dict:
     return dict(_DEFAULT_CONFIG)
 
 
+def harness_setting(key: str, cli_type: str, fallback_harness: str = "claude"):
+    """One harness's value from a per-harness dict setting, without raising.
+
+    Indexing such a setting directly is what this exists to prevent. Spelling a
+    fallback as ``CONFIG[key][fallback_harness]`` raises ``KeyError`` the moment
+    that dict lacks the key, and because the resulting failure response denies
+    on a tool-gate event, one raise blocks every tool on every harness.
+    ``client.py`` did exactly that at two sites.
+
+    ``apply_user_config`` now merges a file's dict onto the declared default, so
+    a user file can no longer be the cause. Two others remain, which is why the
+    helper stays rather than being inlined back:
+
+    - the declared defaults are themselves partial. ``forgecode`` has a
+      ``hook_wrapper_timeouts_seconds`` entry and no
+      ``daemon_client_response_timeouts_seconds`` one, so the direct index
+      raises for a real harness with no user file present at all;
+    - ``cli_type`` arrives from harness detection, so an unrecognised or future
+      harness name reaches this lookup and must resolve to something.
+
+    Resolution order:
+
+    1. the harness's own entry in the resolved dict,
+    2. its ``fallback_harness`` entry, if present,
+    3. the harness's declared default,
+    4. the declared ``fallback_harness``, which is always present.
+    """
+    configured = CONFIG.get(key) or {}
+    if cli_type in configured:
+        return configured[cli_type]
+    if fallback_harness in configured:
+        return configured[fallback_harness]
+    declared = _DEFAULT_CONFIG[key]
+    return declared.get(cli_type, declared[fallback_harness])
+
+
 def user_config_path():
     """Where the optional user config file lives, under AUTORUN_HOME."""
     from pathlib import Path
@@ -1273,7 +1309,21 @@ def apply_user_config(target: dict) -> dict:
             continue
         if isinstance(declared, str) and not isinstance(value, str):
             continue
-        if isinstance(declared, dict) and not isinstance(value, dict):
+        if isinstance(declared, dict):
+            if not isinstance(value, dict):
+                continue
+            # Merge onto the declared default rather than substituting for it.
+            # Assignment makes omission mean "delete", and the dict settings are
+            # the ones where that is most dangerous: `default_integrations` is
+            # the safety-guard table, so a file naming one command used to strip
+            # the other 47 -- rm, dd if=, fdisk among them -- with nothing said
+            # about it. The per-harness timeout dicts had the same shape, where
+            # a partial dict made every CONFIG[key][harness] lookup raise.
+            #
+            # Basing the merge on `declared` and not on `target[key]` keeps the
+            # result a pure function of (defaults, file): applying this twice,
+            # or after another file, cannot accumulate keys from a previous run.
+            target[key] = {**declared, **value}
             continue
         if isinstance(declared, (list, tuple)) and not isinstance(value, (list, tuple)):
             continue

@@ -99,10 +99,9 @@ def daemon_response_timeout_for_cli(cli_type: str) -> float:
     hook-wrapper budgets. Keeping this path config-backed prevents regressions
     where the client times out before the daemon's own fail-safe budget fires.
     """
-    from .config import CONFIG
+    from .config import harness_setting
 
-    timeouts = CONFIG["daemon_client_response_timeouts_seconds"]
-    return float(timeouts.get(cli_type, timeouts["claude"]))
+    return float(harness_setting("daemon_client_response_timeouts_seconds", cli_type))
 
 
 #: Slack left inside the wrapper budget for reading stdin, detecting the CLI,
@@ -136,10 +135,9 @@ def client_total_budget(cli_type: str) -> float:
     a slow cold start spends the response's share rather than failing at a
     constant, and no pair of constants can drift past the wrapper again.
     """
-    from .config import CONFIG
+    from .config import harness_setting
 
-    wrappers = CONFIG["hook_wrapper_timeouts_seconds"]
-    wrapper = float(wrappers.get(cli_type, wrappers["claude"]))
+    wrapper = float(harness_setting("hook_wrapper_timeouts_seconds", cli_type))
     return max(wrapper - CLIENT_BUDGET_MARGIN_SECONDS, 0.1)
 
 

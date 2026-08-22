@@ -10,6 +10,18 @@ marketplace itself carries a separate `version` field.
 
 ### Fixed
 
+- **The TestPyPI rehearsal publishes instead of reporting success and skipping.**
+  `publish.yml` skips its `test` job on a `workflow_dispatch` run and lets
+  `build` through with `always()`. A skipped job propagates down the whole
+  `needs` graph rather than only to its direct dependents, so `publish-testpypi`
+  — which carried no condition of its own — was skipped along with `test` while
+  the run still concluded `success`. The rehearsal exists to exercise trusted
+  publishing before the permanent write to the real index, and it uploaded
+  nothing: a green run proving only that nothing had been attempted. Both
+  publishing jobs now name the result they require instead of inheriting one,
+  and `test_publishing_jobs_state_their_own_precondition` fails on any job that
+  reaches an index behind an inherited gate.
+
 - **A config file that names one thing no longer erases the rest.** The user
   config tier overlaid a file's value by assignment, so for the settings that
   hold a dict, naming one key replaced every other key. Two of those dicts make

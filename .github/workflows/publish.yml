@@ -115,6 +115,13 @@ jobs:
 
   publish-testpypi:
     needs: build
+    # `test` is skipped on a dispatch run, and a skipped job propagates down the
+    # whole needs graph, not just to its direct dependents. `build` overrides
+    # that with `always()`; this job did not, so the rehearsal skipped its only
+    # publishing step and the run still reported success -- a green rehearsal
+    # that uploaded nothing and proved nothing about trusted publishing. State
+    # the real precondition instead of inheriting one.
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -135,9 +142,17 @@ jobs:
 
   publish-pypi:
     needs: publish-testpypi
-    # Never reachable from a dispatch run with the default input, so the
-    # rehearsal cannot publish to the real index by accident.
-    if: github.event_name == 'push' && inputs.testpypi_only != true
+    # Never reachable from a dispatch run: the event check alone excludes it, so
+    # the rehearsal cannot publish to the real index even if its input changes.
+    # The TestPyPI result is named rather than inherited for the same reason as
+    # above -- the job it needs now carries its own condition, and PyPI must
+    # never be reached from a rehearsal that did not actually upload.
+    # Bracket notation because a hyphenated job id is not a bare property name.
+    if: >-
+      ${{ !cancelled()
+      && needs['publish-testpypi'].result == 'success'
+      && github.event_name == 'push'
+      && inputs.testpypi_only != true }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write

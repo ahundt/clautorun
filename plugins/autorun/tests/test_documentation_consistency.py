@@ -978,3 +978,43 @@ def test_ci_actions_are_pinned_to_full_commits():
             if not re.fullmatch(r"[0-9a-f]{40}", ref):
                 mutable.append(f"{path.relative_to(REPO_ROOT)}:{number}: {ref}")
     assert not mutable, "CI actions use mutable refs:\n  " + "\n  ".join(mutable)
+
+
+def test_publishing_jobs_state_their_own_precondition():
+    """A job that reaches a package index must not inherit its gate from `needs`.
+
+    GitHub skips a job when *any* transitive ancestor was skipped, not only a
+    direct dependency. `publish.yml` skips `test` on a `workflow_dispatch` run
+    and lets `build` through with `always()`; `publish-testpypi` carried only
+    `needs: build`, so it was skipped along with `test` -- and the run still
+    reported `success`. The TestPyPI rehearsal uploaded nothing and proved
+    nothing, which matters because that rehearsal is the only thing standing
+    between a misconfigured OIDC setup and a permanent, unrepeatable write to
+    the real index.
+
+    Stated as the violation it excludes: a job declaring an `environment` (the
+    publishing jobs, and only those) whose `if` does not name the job it needs.
+    A green run that published nothing is the failure this catches, and it is
+    indistinguishable from a working one without this check.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
+    )
+    inherited = []
+    for name, job in workflow["jobs"].items():
+        if "environment" not in job:
+            continue
+        condition = str(job.get("if", ""))
+        needs = job.get("needs") or []
+        for need in [needs] if isinstance(needs, str) else needs:
+            if need not in condition:
+                inherited.append(
+                    f"{name}: needs {need!r} but its `if` ({condition or 'absent'}) "
+                    f"never names it, so a skipped ancestor skips it silently"
+                )
+    assert not inherited, (
+        "a publishing job can be skipped by a skipped ancestor while the run "
+        "still reports success:\n  " + "\n  ".join(inherited)
+    )

@@ -10,6 +10,23 @@ marketplace itself carries a separate `version` field.
 
 ### Fixed
 
+- **Retiring a superseded distribution no longer deletes the `extract-pdfs` and
+  `autorun` commands.** `uv tool uninstall` removes console scripts by *name*,
+  not by owner, and every uv tool shares one bin directory. With `autorun-ai`
+  installed and providing all three scripts, `uv tool uninstall
+  autorun-pdf-extractor` printed "Uninstalled 1 executable: extract-pdfs" and
+  `uv tool uninstall autorun` printed "Uninstalled 3 executables: autorun,
+  autorun-install, extract-pdfs" — leaving the current distribution installed
+  with no working command. The first of those already shipped, so an upgrade
+  silently removed `extract-pdfs` from anyone who still had the retired PDF
+  package. Putting the scripts back is not possible from a `uv tool` install:
+  the repair would reinstall the current distribution, and the only local path
+  is `.../site-packages/autorun`, the import package, which `uv tool install`
+  refuses. The install-time sweep now keeps any uv-installed distribution whose
+  console script is one of autorun's own and names it, with the exact command
+  to reclaim the disk. The pip route still sweeps, because a pip-installed
+  retired package owns its own environment.
+
 - **The TestPyPI rehearsal publishes instead of reporting success and skipping.**
   `publish.yml` skips its `test` job on a `workflow_dispatch` run and lets
   `build` through with `always()`. A skipped job propagates down the whole

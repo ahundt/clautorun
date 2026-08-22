@@ -106,9 +106,23 @@ that need it. No disk access: stage generated content to a temp dir and point th
   path: deleting it would remove state Claude or Codex still tracks. Claude's
   fallback cache writer proves ownership by path and deliberately writes no
   marker.
+- **Never `uv tool uninstall` a name whose console script is also ours.** uv
+  removes scripts by *name*, not by owner, and every uv tool shares one bin
+  directory. Measured, with `autorun-ai` installed and providing all three:
+  `uv tool uninstall autorun` printed "Uninstalled 3 executables: autorun,
+  autorun-install, extract-pdfs", and `uv tool uninstall
+  autorun-pdf-extractor` printed "Uninstalled 1 executable: extract-pdfs" —
+  the second already shipped. Restoring them is not possible from a uv tool
+  install: the only local path is `.../site-packages/autorun`, the import
+  package, which `uv tool install` refuses. So
+  `entrypoint._retire_legacy_distributions` keeps such a distribution and
+  reports it with the command to reclaim the disk. The pip route still sweeps —
+  a pip-installed retired package owns its own environment.
 - **The installer runs before its dependencies exist.** `hooks/hook_entry.py` is
-  stdlib-only; on `ImportError` it spawns `uv pip install autorun && autorun
-  --install` in the background and the next hook finds the deps. So a missing
+  stdlib-only; on `ImportError` it spawns an install of *this source* — the
+  plugin directory when it has a `pyproject.toml`, else `BOOTSTRAP_SOURCE`, the
+  git URL — followed by `python -m autorun --install`, and the next hook finds
+  the deps. It never installs a bare distribution name. So a missing
   dependency must surface as an `ImportError` at import: any other exception is
   caught by `run_fallback`'s `except Exception`, which fails open and never
   bootstraps, leaving autorun permanently uninstalled. `filelock` in `fs` is the

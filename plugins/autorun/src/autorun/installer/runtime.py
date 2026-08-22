@@ -38,7 +38,7 @@ from typing import Callable, Mapping, Sequence
 
 __all__ = [
     "DirectCommand", "UvCommand", "hook_command", "has_uv", "python_runner", "Probe", "probe_runtime", "probe_hook_runtime",
-    "Outcome", "Runner", "bootstrap", "ensure_cli_entry_points", "restart_daemon",
+    "CLI_SCRIPTS", "Outcome", "Runner", "bootstrap", "restart_daemon",
     "sync_dependencies_argv", "uv_tool_install_argv",
     "Version", "self_update", "update_argv", "detect_update_method",
     "installed_extension_name", "REPOSITORY", "EXTENSION_NAMES",
@@ -358,84 +358,10 @@ def bootstrap(
     return tuple(outcomes)
 
 
-def ensure_cli_entry_points(
-    plugin_dir: Path,
-    *,
-    scripts: Sequence[str] = ("autorun", "autorun-install", "extract-pdfs"),
-    run: Runner = _spawn,
-) -> Outcome | None:
-    """Reinstall the CLI when an install left its console scripts missing.
-
-    Returns ``None`` when every script is present, so a healthy install stays
-    silent and only a real repair is reported.
-
-    Retiring a distribution that shares console scripts with the current one
-    removes those scripts. Measured on an upgrade from the pre-rename
-    distribution: ``uv tool uninstall autorun`` deleted ``autorun``,
-    ``autorun-install`` and ``extract-pdfs`` even though ``autorun-ai`` was
-    installed and provided all three, and the walk still reported every step
-    ``ok`` -- leaving the new distribution installed with no ``autorun``
-    command. Only ``uv tool install --force`` brought them back, which no user
-    would know to run.
-
-    Checking that the command exists is deliberately stronger than checking
-    that the retire ran before the install. Step order is what *should* prevent
-    this; a missing command is what the user actually experiences, and it is
-    reachable from causes order cannot cover -- a uv behaviour change, an
-    interrupted install, a shadowing entry on PATH.
-
-    Presence is checked in uv's own tool bin directory, not with
-    ``shutil.which``. ``which`` answers "is there an ``autorun`` anywhere on
-    PATH", which is a weaker question than "did this install produce one":
-    during development it found a different installation entirely
-    (``~/.local/bin/autorun``) and reported health while this install's bin
-    directory was empty. The directory uv writes to is the only place whose
-    contents this install is responsible for.
-
-    Repair is idempotent, so a false positive costs one reinstall rather than a
-    wrong answer.
-    """
-    try:
-        located = run(("uv", "tool", "dir", "--bin"))
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if located.returncode != 0 or not (located.stdout or "").strip():
-        return None
-    bin_dir = Path((located.stdout or "").strip())
-    suffix = ".exe" if os.name == "nt" else ""
-
-    def absent(names: Sequence[str]) -> list[str]:
-        """Which of ``names`` uv's bin directory does not hold.
-
-        One predicate for both the before and after check. Written twice, the
-        second copy reached for ``shutil.which``, which answers "is there an
-        ``autorun`` anywhere on PATH" -- so a repair that produced nothing would
-        still report success as long as some other installation shadowed it.
-        """
-        return [name for name in names if not (bin_dir / f"{name}{suffix}").exists()]
-
-    missing = absent(scripts)
-    if not missing:
-        return None
-    try:
-        result = run(uv_tool_install_argv(plugin_dir))
-    except (OSError, subprocess.SubprocessError) as error:
-        return Outcome(
-            "CLI entry points",
-            False,
-            f"{', '.join(missing)} missing and reinstall failed: "
-            f"{type(error).__name__}: {error}. "
-            f"Run: uv tool install --force {plugin_dir}",
-        )
-    still = absent(scripts)
-    if result.returncode == 0 and not still:
-        return Outcome("CLI entry points", True, f"restored {', '.join(missing)}")
-    return Outcome(
-        "CLI entry points",
-        False,
-        f"{', '.join(still or missing)} still missing after reinstall. "
-        f"Run: uv tool install --force {plugin_dir}",
-    )
+#: Console scripts this distribution provides. Retiring any *other* distribution
+#: that also provided them deletes them by name, so these are what a legacy
+#: sweep can cost a user.
+CLI_SCRIPTS: tuple[str, ...] = ("autorun", "autorun-install", "extract-pdfs")
 
 
 def restart_daemon(*, run: Runner = _spawn) -> Outcome:

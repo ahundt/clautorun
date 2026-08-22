@@ -75,22 +75,11 @@ _PLUGIN_DISTRIBUTIONS = {
     # prohibits the bare name ("This project name isn't allowed"); the console
     # script stayed `autorun`.
     #
-    # "autorun" is deliberately absent from [1:]. Retiring a distribution that shares
-    # console scripts with the current one removes those scripts:
-    # `uv tool uninstall autorun` deletes `autorun`, `autorun-install` and
-    # `extract-pdfs` by name even though "autorun-ai" provides all three, and a
-    # measured upgrade then ended with the new distribution installed and no
-    # `autorun` command. `runtime.ensure_cli_entry_points` was added to repair
-    # exactly that, and in isolation it does -- but with the sweep enabled the
-    # upgrade still finished with an empty bin directory and the repair never
-    # reported, so the sweep is not yet safe to enable and the cause is not yet
-    # established. Retiring costs the command; the orphan costs disk.
-    #
-    # Survivable because "autorun" was never published to PyPI: only git and
-    # local installs can hold it, and installing "autorun-ai" hands the shared
-    # scripts to the newer tool -- measured, `autorun --version` afterwards
-    # resolves to `.../tool/autorun-ai/bin/autorun`.
-    "ar": ("autorun-ai", "autorun-pdf-extractor", "pdf-extractor"),
+    # Listing a name here means "retire it if that is safe", not "uninstall it".
+    # `_retire_legacy_distributions` keeps any uv-installed entry whose console
+    # script is also one of ours, because `uv tool uninstall` removes scripts by
+    # name across the one shared bin directory; the pip route still sweeps.
+    "ar": ("autorun-ai", "autorun", "autorun-pdf-extractor", "pdf-extractor"),
 }
 
 
@@ -435,11 +424,61 @@ def _retire_legacy_distributions(plugin: str) -> list[runtime.Outcome]:
     A failure here is reported, not fatal: an orphaned environment wastes disk
     but does not break the install that follows it.
     """
-    outcomes = [
-        _remove_distribution(package)
-        for package in _PLUGIN_DISTRIBUTIONS.get(plugin, ())[1:]
-    ]
+    outcomes: list[runtime.Outcome | None] = []
+    for package in _PLUGIN_DISTRIBUTIONS.get(plugin, ())[1:]:
+        # The uv-tool route only. Every uv tool shares one bin directory, so
+        # uninstalling any of them removes that script name for all of them.
+        # A pip-installed retired package lives in its own environment, where
+        # removing it takes only its own copy, so that sweep still runs.
+        if (
+            bool(shutil.which("uv"))
+            and _uv_tool_installed(package)
+            and _UV_TOOL_SCRIPTS[package] in runtime.CLI_SCRIPTS
+        ):
+            outcomes.append(_shared_script_orphan(package))
+            continue
+        outcomes.append(_remove_distribution(package))
     return [outcome for outcome in outcomes if outcome is not None]
+
+
+def _shared_script_orphan(package: str) -> runtime.Outcome:
+    """Report, without removing, a legacy distribution we must not uninstall.
+
+    ``uv tool uninstall`` deletes console scripts by *name*, not by owner, so
+    removing a legacy distribution takes down commands the current one still
+    provides. Measured twice, in uv's own words, with ``autorun-ai`` installed
+    and providing all three scripts::
+
+        $ uv tool uninstall autorun
+        Uninstalled 3 executables: autorun, autorun-install, extract-pdfs
+
+        $ uv tool uninstall autorun-pdf-extractor
+        Uninstalled 1 executable: extract-pdfs
+
+    The second is not hypothetical -- that sweep already shipped, so an upgrade
+    silently removed ``extract-pdfs`` from users who had the retired PDF
+    distribution.
+
+    Restoring them afterwards is not available here. The repair would have to
+    reinstall the current distribution, and from a ``uv tool`` install there is
+    no project root on disk to reinstall from: the only local path is
+    ``.../site-packages/autorun``, the import package, which ``uv tool install``
+    rightly refuses.
+
+    So the orphan is kept and named. It costs disk; deleting it costs the user a
+    working command, and only one of those is recoverable without knowing to run
+    a command nobody documented.
+
+    Ownership is the caller's question, already settled before this is reached.
+    """
+    return runtime.Outcome(
+        f"{package} CLI",
+        True,
+        f"left installed: removing it would delete {_UV_TOOL_SCRIPTS[package]!r}, "
+        f"which {_PLUGIN_DISTRIBUTIONS['ar'][0]} also provides. "
+        f"To reclaim the disk: uv tool uninstall {package} "
+        f"&& uv tool install --force {_PLUGIN_DISTRIBUTIONS['ar'][0]}",
+    )
 
 
 def _pip_package_owned(package: str) -> bool:
@@ -574,17 +613,6 @@ def install_plugins(
         restarted = runtime.restart_daemon(run=_run)
         print(restarted.describe())
         ok = restarted.ok
-    # Dead last, after every step that can remove a console script. Retiring a
-    # legacy distribution deletes entry points the current one still owns, and
-    # measurement put that deletion later than it reads: checking right after
-    # the CLI install, and again after `orchestrate.install`, both found the
-    # scripts present while the walk still finished with an empty bin directory.
-    # Rather than keep chasing which step removes them, verify the property that
-    # matters where nothing can undo it. Silent when nothing is missing.
-    if not dry_run and "ar" in plugins and plugin is not None and resolved["tool"]:
-        if repair := runtime.ensure_cli_entry_points(plugin, run=_run):
-            print(repair.describe())
-            ok = ok and repair.ok
     return 0 if ok else 1
 
 

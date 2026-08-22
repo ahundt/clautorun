@@ -338,7 +338,12 @@ def test_removing_the_pdf_plugin_never_reaches_a_python_distribution(isolated):
     # The distribution is "autorun-ai": PyPI prohibits the bare name. The
     # console script, the import package and the plugin id are unchanged.
     assert entrypoint._PLUGIN_DISTRIBUTIONS["ar"][0] == "autorun-ai"
+    # Listing a name here means "retire it if that is safe". `autorun` shares
+    # all three console scripts with the current distribution, so the uv-tool
+    # sweep keeps it and says so; see
+    # test_the_walk_never_uninstalls_a_distribution_sharing_one_of_our_scripts.
     assert set(entrypoint._PLUGIN_DISTRIBUTIONS["ar"][1:]) == {
+        "autorun",
         "autorun-pdf-extractor",
         "pdf-extractor",
     }
@@ -1040,3 +1045,81 @@ def test_partial_uninstall_of_pdf_preserves_every_autorun_artifact(monkeypatch, 
     # the `autorun-ai` distribution, which also carries autorun's own CLI, so
     # reaching any package here would uninstall the tool the user kept.
     assert not [call for call in calls if "uninstall" in call and "tool" in call], calls
+
+
+def test_the_walk_never_uninstalls_a_distribution_sharing_one_of_our_scripts(
+    monkeypatch, isolated, capsys
+):
+    """Stated as the violation: an upgrade leaves the user with no command.
+
+    ``uv tool uninstall`` deletes console scripts by *name*, not by owner.
+    Measured twice, in uv's own words, with ``autorun-ai`` installed and
+    providing all three scripts::
+
+        $ uv tool uninstall autorun
+        Uninstalled 3 executables: autorun, autorun-install, extract-pdfs
+
+        $ uv tool uninstall autorun-pdf-extractor
+        Uninstalled 1 executable: extract-pdfs
+
+    The second already shipped, so this is a defect in released behaviour and
+    not a consequence of the rename. Restoring the scripts afterwards is not
+    available: the repair would reinstall the current distribution, and from a
+    ``uv tool`` install the only local path is ``.../site-packages/autorun``,
+    the import package, which ``uv tool install`` refuses.
+
+    So the assertion is on the subprocess layer, which is where the damage is
+    done -- not on a flag, a comment, or an ordering. No ``uv tool uninstall``
+    of a name whose script is one of ours may be issued at all.
+    """
+    from autorun.installer import entrypoint
+
+    calls: list[tuple[str, ...]] = []
+
+    def record(argv):
+        calls.append(tuple(str(part) for part in argv))
+        return subprocess.CompletedProcess(
+            argv, 0, "ar\n" if tuple(argv)[:3] == ("agy", "plugin", "list") else "", ""
+        )
+
+    # Claim every legacy distribution is present, so nothing is skipped merely
+    # for being absent -- the skip under test must be the shared-script rule.
+    monkeypatch.setattr(entrypoint, "_uv_tool_installed", lambda _package: True)
+    monkeypatch.setattr(entrypoint, "_run", record)
+    monkeypatch.setattr(entrypoint.shutil, "which", lambda name: f"/bin/{name}")
+
+    assert entrypoint.install_plugins("ar", conductor=False) == 0
+
+    uninstalls = [call for call in calls if call[:3] == ("uv", "tool", "uninstall")]
+    assert uninstalls == [], (
+        f"these would delete console scripts autorun-ai provides: {uninstalls}"
+    )
+
+    # Principle 4: when we cannot fix it for the user, say so and name the exact
+    # next action. A silent skip would leave the orphan invisible forever.
+    printed = capsys.readouterr().out
+    for package in entrypoint._PLUGIN_DISTRIBUTIONS["ar"][1:]:
+        assert package in printed, f"{package} orphan not reported"
+    assert "uv tool install --force autorun-ai" in printed, printed
+
+
+def test_every_legacy_distribution_shares_a_script_with_the_current_one():
+    """The rule is a predicate, not a hardcoded list of exceptions.
+
+    Every name autorun has retired happens to provide one of its own scripts
+    today, so the uv-tool sweep currently removes nothing. That is the correct
+    outcome, and deriving it keeps a future non-overlapping legacy name
+    sweepable without editing this test. The pip route is unaffected: a
+    pip-installed retired package owns its own environment, so removing it
+    takes only its own copy of the script.
+    """
+    from autorun.installer import entrypoint, runtime
+
+    legacy = entrypoint._PLUGIN_DISTRIBUTIONS["ar"][1:]
+    assert legacy, "there is nothing to retire, so the rule is untested"
+    shared = {
+        package
+        for package in legacy
+        if entrypoint._UV_TOOL_SCRIPTS[package] in runtime.CLI_SCRIPTS
+    }
+    assert shared == set(legacy), sorted(set(legacy) - shared)

@@ -72,7 +72,7 @@ provenance is written by the release builder and is not hand-edited.
 ### pdf-extractor Plugin (3+ files)
 
 It has no `pyproject.toml`: the plugin is a harness plugin, and its code ships
-inside the `autorun` distribution as `pdf_extraction` behind the `pdf` extra.
+inside the `autorun-ai` distribution as `pdf_extraction` behind the `pdf` extra.
 
 | File | Field/Pattern | Notes |
 |------|---------------|-------|
@@ -90,7 +90,7 @@ inside the `autorun` distribution as `pdf_extraction` behind the `pdf` extra.
 | `AGENTS.md` | 2 refs — `## autorun Plugin (vX.Y.Z)` and `## pdf-extractor Plugin (vX.Y.Z)`. `CLAUDE.md` and `GEMINI.md` are symlinks to it; edit this file, never a link |
 | `plugins/autorun/AGENTS.md` | 1 ref — the illustrative plugin-cache path `<version>/` |
 | `plugins/autorun/HOOK_ARCHITECTURE.md` | Version references in docs |
-| `docs/version_update_checklist.md` | No current-version field; update only examples that intentionally track the release |
+| `RELEASING.md` | No current-version field; update only examples that intentionally track the release |
 | `plugins/pdf-extractor/CLAUDE.md` | Section header |
 
 ### Skills (4+ files)
@@ -224,7 +224,7 @@ test -z "$(git status --porcelain=v1)"
 # Run from the plugin directories, matching CI discovery/configuration.
 (cd plugins/autorun && uv run --project . --locked pytest tests/ -m "not tmux and not e2e and not release" -v)
 # The PDF tests stay with their plugin, but the code they import ships in the
-# autorun distribution and `plugins/pdf-extractor` deliberately has no
+# autorun-ai distribution and `plugins/pdf-extractor` deliberately has no
 # pyproject.toml — so the environment must come from the autorun project, with
 # `--extra pdf` for the backends. Running it as its own project resolves the
 # workspace root instead and collects four `ModuleNotFoundError: pdf_extraction`.
@@ -351,7 +351,7 @@ Publishing (OIDC). No API token is stored anywhere.
 
 | Distribution | Source directory | Installs as |
 |--------------|------------------|-------------|
-| `autorun` | `plugins/autorun` | `uv tool install autorun`, or `'autorun[pdf]'` for PDF extraction |
+| `autorun-ai` | `plugins/autorun` | `uv tool install autorun-ai`, or `'autorun-ai[pdf]'` for PDF extraction |
 
 There is no second package. `plugins/pdf-extractor` is a plugin in every
 harness — its own manifest, command, and skill — while its code ships inside
@@ -407,10 +407,10 @@ plain form too: it is the one that proves no extraction library is required.
 ```bash
 UV_TOOL_DIR=$(mktemp -d) UV_TOOL_BIN_DIR=$(mktemp -d) \
   uv tool install --index-url https://test.pypi.org/simple/ \
-  --extra-index-url https://pypi.org/simple/ autorun
+  --extra-index-url https://pypi.org/simple/ autorun-ai
 UV_TOOL_DIR=$(mktemp -d) UV_TOOL_BIN_DIR=$(mktemp -d) \
   uv tool install --index-url https://test.pypi.org/simple/ \
-  --extra-index-url https://pypi.org/simple/ 'autorun[pdf]'
+  --extra-index-url https://pypi.org/simple/ 'autorun-ai[pdf]'
 ```
 
 TestPyPI refuses a re-upload of an existing file. The workflow passes

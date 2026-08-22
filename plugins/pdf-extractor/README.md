@@ -36,22 +36,22 @@ Prime Agent read that shared route through their extension surface.
 ### Python CLI
 
 There is no separate package to install. `extract-pdfs` and the `pdf_extraction`
-module ship inside the `autorun` distribution, and every extraction library is an
+module ship inside the `autorun-ai` distribution, and every extraction library is an
 optional extra. `pdf` installs markitdown, pdfplumber, pdfminer, and pypdf:
 
 ```bash
-uv tool install 'autorun[pdf]'
+uv tool install 'autorun-ai[pdf]'
 ```
 
 For the Linux/Windows GPU backend (docling):
 ```bash
-uv tool install --force 'autorun[pdf,pdf-gpu]'
+uv tool install --force 'autorun-ai[pdf,pdf-gpu]'
 ```
 
 Source checkout installation:
 
 ```bash
-uv tool install 'autorun[pdf] @ git+https://github.com/ahundt/autorun.git#subdirectory=plugins/autorun'
+uv tool install 'autorun-ai[pdf] @ git+https://github.com/ahundt/autorun.git#subdirectory=plugins/autorun'
 ```
 
 | Extra | Adds |
@@ -68,7 +68,7 @@ platform graph pins Pillow below the first fully patched release. The `pdf-gpu`
 extra is empty on macOS because docling's macOS model stack still selects an
 advisory-affected transformers 4.x release.
 
-Plain `uv tool install autorun` still gives you the CLI: `--list-backends`
+Plain `uv tool install autorun-ai` still gives you the CLI: `--list-backends`
 reports what is missing, and an extraction attempt names the extra to install.
 The only backend available without an extra is `pdftotext`, if poppler is on the
 system. Nobody who never touches a PDF downloads an extraction library.

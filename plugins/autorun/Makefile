@@ -1,5 +1,5 @@
 # Thin aliases over the commands README.md, AGENTS.md, .github/workflows/ci.yml
-# and docs/version_update_checklist.md already document. This file adds short
+# and RELEASING.md already document. This file adds short
 # names and nothing else — no second test driver, no second dependency set.
 #
 # It used to have both. Every test target shelled out to `run_tests.py`, which

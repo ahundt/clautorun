@@ -251,14 +251,14 @@ def test_agent_memory_files_only_reference_methods_that_exist():
 
 # === Release checklist must name real files, and name all of them ===
 #
-# docs/version_update_checklist.md is the release runbook. It drifted silently
+# RELEASING.md is the release runbook. It drifted silently
 # when CLAUDE.md and GEMINI.md became symlinks to AGENTS.md: the checklist kept
 # naming them, and its row for GEMINI.md claimed "Install verification examples
 # (8 refs)" that no longer existed anywhere. A releaser following it hunts for
 # content that is not there, and any version site the checklist omits is one a
 # release silently leaves stale.
 
-_CHECKLIST = REPO_ROOT / "docs" / "version_update_checklist.md"
+_CHECKLIST = REPO_ROOT / "RELEASING.md"
 _CHECKLIST_PATH_RE = re.compile(r"^\|\s*`([^`]+)`\s*\|", re.MULTILINE)
 
 
@@ -277,7 +277,7 @@ def _checklist_paths() -> set[str]:
 def test_release_checklist_names_only_files_that_exist():
     missing = sorted(p for p in _checklist_paths() if not (REPO_ROOT / p).exists())
     assert not missing, (
-        "docs/version_update_checklist.md names paths that do not exist, so a "
+        "RELEASING.md names paths that do not exist, so a "
         "release will skip them silently:\n  " + "\n  ".join(missing)
     )
 
@@ -291,7 +291,7 @@ def test_every_checklist_uv_command_names_a_real_project():
 
     `(cd plugins/pdf-extractor && uv run --project . ...)` read fine and passed
     every prose check, but that directory deliberately has no `pyproject.toml`:
-    UV resolved the workspace root instead, the autorun distribution was never
+    UV resolved the workspace root instead, the autorun-ai distribution was never
     installed, and the documented command failed in a clean environment with
     four `ModuleNotFoundError: pdf_extraction` errors. The release gate ran
     something else entirely, so nothing noticed.
@@ -314,7 +314,7 @@ def test_every_checklist_uv_command_names_a_real_project():
         if not (resolved / "pyproject.toml").is_file():
             broken.append(line.strip())
     assert not broken, (
-        "docs/version_update_checklist.md runs `uv run --project` against a "
+        "RELEASING.md runs `uv run --project` against a "
         "directory with no pyproject.toml, so UV resolves some other project "
         "and the command does not test what the runbook claims:\n  "
         + "\n  ".join(broken)
@@ -329,7 +329,7 @@ def test_release_runbook_rehearses_testpypi_before_tagging():
     rehearsal = runbook.index("### Rehearse on TestPyPI before any tag")
     tag = runbook.index("### Stage 4: Tag and push")
     assert setup < rehearsal < tag, (
-        "docs/version_update_checklist.md places TestPyPI setup or rehearsal "
+        "RELEASING.md places TestPyPI setup or rehearsal "
         "after tag creation, so a releaser following the document in order can "
         "create the public tag before proving trusted publishing"
     )
@@ -439,7 +439,7 @@ def test_plugin_readme_describes_one_python_distribution():
     """
     readme = (PLUGIN_ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "autorun[pdf]" in readme, (
+    assert "autorun-ai[pdf]" in readme, (
         "the plugin README must name the extra that actually installs PDF support"
     )
     assert "distribution is released and installed separately" not in readme
@@ -460,7 +460,7 @@ def test_current_changelog_covers_pi_and_published_distributions():
     changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     section = changelog.split(f"## [{version}]", 1)[1].split("\n## [", 1)[0]
 
-    for required in ("Pi", "PyPI", "`autorun`", "`autorun[pdf]`"):
+    for required in ("Pi", "PyPI", "`autorun-ai`", "`autorun-ai[pdf]`"):
         assert required in section, f"CHANGELOG.md [{version}] omits {required}"
 
 
@@ -477,7 +477,7 @@ def test_published_distributions_have_project_urls():
 
 
 def test_public_install_guides_use_release_artifact_identities():
-    """The workspace root is not the installable autorun distribution, and
+    """The workspace root is not the installable autorun-ai distribution, and
     Claude registers the plugin as ``ar`` inside marketplace ``autorun``."""
     documents = (
         REPO_ROOT / "README.md",
@@ -502,7 +502,7 @@ def test_public_install_guides_use_release_artifact_identities():
     pdf_readme = (
         REPO_ROOT / "plugins" / "pdf-extractor" / "README.md"
     ).read_text(encoding="utf-8")
-    assert "uv tool install 'autorun[pdf]'" in pdf_readme
+    assert "uv tool install 'autorun-ai[pdf]'" in pdf_readme
 
 
 def test_release_checklist_covers_every_file_carrying_the_version():
@@ -544,7 +544,7 @@ def test_release_checklist_covers_every_file_carrying_the_version():
 
     assert not uncovered, (
         f"these files contain the current version {version!r} but are absent from "
-        "docs/version_update_checklist.md, so the next release will leave them "
+        "RELEASING.md, so the next release will leave them "
         "stale:\n  " + "\n  ".join(sorted(uncovered))
     )
 
@@ -572,7 +572,7 @@ def _declared_version(relative_path: str, field: str) -> str:
 
 # Every field that declares the release version, and must therefore move
 # together. Files that merely *contain* the version as test data are excluded on
-# purpose -- see Gotcha 5 in docs/version_update_checklist.md. The root
+# purpose -- see Gotcha 5 in RELEASING.md. The root
 # marketplace catalog is excluded too: it carries the stable base line, which
 # test_root_marketplace_catalog_tracks_the_plugin_base_release checks separately.
 RELEASE_IDENTITY_FIELDS = (
@@ -587,7 +587,7 @@ RELEASE_IDENTITY_FIELDS = (
     ("plugins/autorun/src/autorun/metadata.json", "version"),
     ("plugins/autorun/src/autorun/gemini_template/gemini-extension.json", "version"),
     # The pdf plugin has no pyproject: it is a harness plugin whose code ships
-    # inside the autorun distribution as `pdf_extraction`.
+    # inside the autorun-ai distribution as `pdf_extraction`.
     ("plugins/pdf-extractor/src/pdf_extraction/__init__.py", "__version__"),
     ("plugins/pdf-extractor/.claude-plugin/plugin.json", "version"),
     ("plugins/pdf-extractor/gemini-extension.json", "version"),
@@ -654,7 +654,7 @@ def test_the_pdf_plugin_ships_inside_autorun_and_not_beside_it():
             encoding="utf-8"
         )
     )["project"]
-    assert autorun["name"] == "autorun"
+    assert autorun["name"] == "autorun-ai"
     assert autorun["scripts"]["extract-pdfs"] == "pdf_extraction.cli:main"
 
     plugin = json.loads(
@@ -668,7 +668,7 @@ def test_the_pdf_plugin_ships_inside_autorun_and_not_beside_it():
     )
 
     workspace = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert set(workspace["tool"]["uv"]["sources"]) == {"autorun"}, (
+    assert set(workspace["tool"]["uv"]["sources"]) == {"autorun-ai"}, (
         "[tool.uv.sources] keys must match the member distribution names or uv "
         "resolves the workspace member from PyPI instead of the local tree"
     )
@@ -807,7 +807,7 @@ def test_the_pdf_plugin_guides_name_every_harness_flag_the_cli_accepts():
 #: kept telling a maintainer to re-resolve while CI was locked down.
 _LOCKED_UV_SURFACES = (
     Path(".github") / "workflows" / "ci.yml",
-    Path("docs") / "version_update_checklist.md",
+    Path("RELEASING.md"),
 )
 
 
@@ -854,7 +854,7 @@ def test_every_release_gate_environment_is_the_locked_one(relative):
 
 def test_quick_method_runs_tests_against_the_committed_lock():
     """The first copy/paste test command is part of the release gate too."""
-    checklist = (REPO_ROOT / "docs" / "version_update_checklist.md").read_text(
+    checklist = (REPO_ROOT / "RELEASING.md").read_text(
         encoding="utf-8"
     )
     quick_method = checklist.split("## Quick Method", 1)[1].split(
@@ -920,7 +920,7 @@ def test_no_contributor_entrypoint_installs_an_extra_that_was_removed():
     entrypoints = [
         REPO_ROOT / "plugins" / "autorun" / "Makefile",
         REPO_ROOT / ".github" / "workflows" / "ci.yml",
-        REPO_ROOT / "docs" / "version_update_checklist.md",
+        REPO_ROOT / "RELEASING.md",
     ]
     undeclared: list[str] = []
     for path in entrypoints:
@@ -978,6 +978,244 @@ def test_ci_actions_are_pinned_to_full_commits():
             if not re.fullmatch(r"[0-9a-f]{40}", ref):
                 mutable.append(f"{path.relative_to(REPO_ROOT)}:{number}: {ref}")
     assert not mutable, "CI actions use mutable refs:\n  " + "\n  ".join(mutable)
+
+
+def test_each_autorun_spelling_keeps_its_own_job():
+    """Five things are spelled "autorun"; exactly one of them is "autorun-ai".
+
+    There are exactly THREE names to know, and one derived spelling:
+
+    | thing                | spelling     | where it lives                     |
+    |----------------------|--------------|------------------------------------|
+    | PyPI distribution    | `autorun-ai` | pyproject `name`, install commands |
+    | import package       | `autorun`    | `src/autorun/`, `import autorun`   |
+    | console script       | `autorun`    | `[project.scripts]`                |
+    | marketplace          | `autorun`    | `.claude-plugin/marketplace.json`  |
+    | plugin id / prefix   | `ar`         | plugin.json, `/ar:<cmd>`, commands/|
+    | wheel filename stem  | *derived*    | `DISTRIBUTION.replace("-", "_")`   |
+
+    The wheel stem is deliberately absent from that list of names: nothing
+    declares it, the build backend emits it because PEP 427 normalises "-" to
+    "_". It was briefly written out as a literal in four places, which made a
+    fourth spelling to keep in sync for no gain; it is now computed from the
+    distribution, and this test fails if a literal comes back.
+
+    `ar` is short on purpose, so the prefix types quickly. It is namespaced by
+    the marketplace, never by PyPI -- `ar` on PyPI belongs to an unrelated
+    ar-archive reader, and autorun neither needs nor could have it.
+
+    Only the distribution moved. PyPI prohibits the bare name `autorun`
+    ("This project name isn't allowed"), which is why it carries a suffix at
+    all -- there is no other reason, and nothing else should follow it.
+
+    The confusion this excludes runs both ways: renaming the console script or
+    the import package to match the distribution (breaking every user's muscle
+    memory, every `hooks.json` command and every `import autorun`), or leaving a
+    packaging field spelling the distribution `autorun` (unregistrable, and for
+    `[tool.uv.sources]` it silently resolves the workspace member from PyPI
+    instead of the local tree).
+    """
+    import tomllib
+
+    plugin = tomllib.loads(
+        (PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    workspace = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert plugin["project"]["name"] == "autorun-ai", "the distribution carries the suffix"
+    assert "autorun" in plugin["project"]["scripts"], (
+        "the console script must stay `autorun`; renaming it to match the "
+        "distribution breaks every documented command and every hooks.json entry"
+    )
+    assert (PLUGIN_ROOT / "src" / "autorun" / "__init__.py").is_file(), (
+        "the import package must stay `autorun`; `import autorun` is public API"
+    )
+    assert set(workspace["tool"]["uv"]["sources"]) == {"autorun-ai"}, (
+        "[tool.uv.sources] keys are distribution names, not directory names"
+    )
+
+    # Self-referential and workspace requirements name the distribution, so a
+    # missed one makes `uv lock` report unsatisfiable requirements.
+    for label, requirements in (
+        ("plugin pdf-all extra", plugin["project"]["optional-dependencies"]["pdf-all"]),
+        ("workspace all extra", workspace["project"]["optional-dependencies"]["all"]),
+    ):
+        for requirement in requirements:
+            assert not requirement.startswith("autorun["), (
+                f"{label} requires the prohibited bare name: {requirement!r}"
+            )
+
+    # -- `ar`: the plugin id, which is also the `/ar:` prefix ----------------
+    # Renaming the distribution must not drag the prefix along. Every `/ar:<cmd>`
+    # in a user's muscle memory, every hooks.json command, and every installed
+    # tree at `<config>/plugins/cache/autorun/ar/<version>/` is keyed on it, and
+    # the installer's own note records what a wrong marker costs: "A tree
+    # recorded as `autorun` was unremovable under `ar`, which leaked 362 files."
+    manifest = json.loads(
+        (PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
+    market = json.loads(
+        (PLUGIN_ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
+    )
+    assert manifest["name"] == "ar", "the plugin id is the `/ar:` prefix"
+    assert market["name"] == "autorun", "the marketplace keeps the bare name"
+    assert [entry["name"] for entry in market["plugins"]] == ["ar"], (
+        "the marketplace publishes exactly the `ar` plugin"
+    )
+
+    # -- the wheel stem is derived, never spelled ----------------------------
+    # `test_release_artifacts` cannot parse pyproject at module scope, because
+    # `tomllib` is not stdlib before 3.11 and CI runs 3.10 -- so it carries the
+    # distribution as a constant, and this is where the two are held together.
+    release_artifacts = PLUGIN_ROOT / "tests" / "test_release_artifacts.py"
+    source = release_artifacts.read_text(encoding="utf-8")
+    declared = plugin["project"]["name"]
+    assert f'DISTRIBUTION = "{declared}"' in source, (
+        f"test_release_artifacts.DISTRIBUTION must be {declared!r}"
+    )
+    stem = declared.replace("-", "_")
+    for path in (release_artifacts, REPO_ROOT / ".github" / "workflows" / "publish.yml"):
+        body = path.read_text(encoding="utf-8")
+        code = "\n".join(
+            line for line in body.splitlines() if not line.lstrip().startswith("#")
+        )
+        assert stem not in code, (
+            f"{path.name} spells the wheel stem {stem!r} instead of deriving it from "
+            "the distribution; that is a fourth name to keep in sync"
+        )
+
+
+def test_no_module_looks_up_a_distribution_by_a_literal_name():
+    """``importlib.metadata`` is the only API here that takes a *distribution*.
+
+    Stated as the violation: a call such as ``version("autorun")`` anywhere in
+    shipped source. That is the shape the rename produced twice, and both times
+    it failed silently rather than loudly -- ``version("autorun")`` raises
+    ``PackageNotFoundError``, whose handler degrades to the string "unknown",
+    which compares as older than every release tag, so self-update offers an
+    upgrade forever and no message says why.
+
+    The fix is not "spell it autorun-ai here too": a literal is a second source
+    of truth wherever it appears. `_PLUGIN_DISTRIBUTIONS` is the one place that
+    knows the distribution's name, so every lookup must read it. That keeps the
+    next rename a one-line change instead of a search.
+    """
+    import ast
+
+    lookups = {"version", "distribution", "metadata"}
+    roots = (
+        PLUGIN_ROOT / "src",
+        PLUGIN_ROOT / "hooks",
+        REPO_ROOT / "plugins" / "pdf-extractor" / "src",
+    )
+    offenders, call_sites = [], []
+    for root in roots:
+        for path in sorted(root.rglob("*.py")):
+            if path.is_symlink():
+                continue  # pdf_extraction is symlinked into both trees
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            # Only names actually imported from importlib.metadata count. A
+            # bare `version(...)` is an ordinary helper in several modules, and
+            # `PackageNotFoundError("...")` is a literal string by design.
+            aliases = {
+                alias.asname or alias.name
+                for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom) and node.module == "importlib.metadata"
+                for alias in node.names
+                if alias.name in lookups
+            }
+            dotted = {f"importlib.metadata.{name}" for name in lookups}
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call) or not node.args:
+                    continue
+                rendered = ast.unparse(node.func)
+                if rendered not in aliases and rendered not in dotted:
+                    continue
+                where = f"{path.relative_to(REPO_ROOT)}:{node.lineno}"
+                call_sites.append(where)
+                first = node.args[0]
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    offenders.append(f"{where} {rendered}({first.value!r})")
+
+    # Without this the check passes by finding nothing -- which is exactly what
+    # it would do if the roots, the import form, or `ast.unparse` ever stopped
+    # matching. "No offenders" must mean "looked and found none".
+    assert call_sites, (
+        f"no importlib.metadata call sites found under {[str(r) for r in roots]}; "
+        "the scan is broken, not the source"
+    )
+    assert not offenders, (
+        "distribution looked up by a literal name instead of "
+        "_PLUGIN_DISTRIBUTIONS['ar'][0]:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_documented_install_commands_name_the_registrable_distribution():
+    """No shipped doc may tell a user to install the bare name `autorun`.
+
+    Stated as the violation: an `install` command whose target is `autorun`,
+    `autorun[...]` or `autorun==...`. PyPI refuses that name, so such a command
+    cannot succeed -- it is not a style preference but a broken instruction.
+
+    Paths are not targets: `uv tool install --editable plugins/autorun` and the
+    `git+https://github.com/ahundt/autorun.git#subdirectory=plugins/autorun`
+    form both name locations and stay as they are.
+    """
+    # Parse the install *target*, not any `autorun` on the line. The naive
+    # regex flagged `uv tool install --force autorun-ai && autorun --install`,
+    # whose second `autorun` is the console script being run, not a target.
+    value_flags = {"--index-url", "--extra-index-url", "--python", "--with", "--from"}
+    verb = re.compile(r"\b(?:uv tool install|pip3? install|python -m pip install)\b(.*)")
+
+    def targets(line):
+        """The first positional argument of each install command on ``line``."""
+        for segment in re.split(r"&&|\|\||;", line):
+            found = verb.search(segment)
+            if not found:
+                continue
+            skip = False
+            for token in found.group(1).replace("`", " ").split():
+                if skip:
+                    skip = False
+                elif token in value_flags:
+                    skip = True
+                elif not token.startswith("-"):
+                    yield token.strip("'\"")
+                    break
+
+    def distribution(target):
+        """The distribution a target names, or None when it names a location."""
+        if "/" in target or target.startswith((".", "git+", "$")):
+            return None
+        return re.split(r"[\[=<>~!]", target, maxsplit=1)[0]
+
+    # Release notes are globbed rather than named: spelling a version here would
+    # put a literal this file must bump every release, which
+    # test_release_checklist_covers_every_file_carrying_the_version rejects, and
+    # would silently stop covering the next release's notes.
+    offenders = []
+    for path in (
+        REPO_ROOT / "README.md",
+        REPO_ROOT / "AGENTS.md",
+        REPO_ROOT / "CHANGELOG.md",
+        REPO_ROOT / "RELEASING.md",
+        PLUGIN_ROOT / "README.md",
+        REPO_ROOT / "plugins" / "pdf-extractor" / "README.md",
+        REPO_ROOT / "plugins" / "pdf-extractor" / "CLAUDE.md",
+        *sorted((REPO_ROOT / "docs" / "releases").glob("*.md")),
+    ):
+        if not path.is_file():
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            for target in targets(line):
+                if distribution(target) == "autorun":
+                    offenders.append(
+                        f"{path.relative_to(REPO_ROOT)}:{number}: installs {target!r}"
+                    )
+    assert not offenders, (
+        "these install commands name the prohibited bare distribution "
+        "`autorun` instead of `autorun-ai`:\n  " + "\n  ".join(offenders)
+    )
 
 
 def test_publishing_jobs_state_their_own_precondition():

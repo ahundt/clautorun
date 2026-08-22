@@ -370,10 +370,18 @@ def test_the_currently_installed_version_can_be_compared():
 
     from autorun.installer.runtime import Version
 
+    # Ask for the *distribution*, and ask the one place that knows its name.
+    # Spelling it here made this test a second source of truth that the rename
+    # to "autorun-ai" silently invalidated: `version("autorun")` raised and the
+    # failure read as "uv did not install the metadata", which is a different
+    # and wrong diagnosis.
+    from autorun.installer.entrypoint import _PLUGIN_DISTRIBUTIONS
+
+    distribution = _PLUGIN_DISTRIBUTIONS["ar"][0]
     try:
-        current = installed_version("autorun")
+        current = installed_version(distribution)
     except PackageNotFoundError:
-        pytest.fail("uv did not install the autorun workspace package metadata")
+        pytest.fail(f"uv did not install {distribution!r} package metadata")
 
     assert Version(current, "99.0.0").update_available is True
     assert Version(current, current).update_available is False

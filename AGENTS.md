@@ -43,7 +43,7 @@ installer-specific traps: [`plugins/autorun/src/autorun/installer/AGENTS.md`](pl
 - **Configure an isolated run:** `SB=$(mktemp -d /tmp/arsb.XXXXXX) && mkdir -p "$SB/home" "$SB/ar-home" "$SB/state" "$SB/uv-cache" && env HOME="$SB/home" USERPROFILE="$SB/home" PI_CODING_AGENT_DIR="$SB/home/.pi/agent" AUTORUN_HOME="$SB/ar-home" AUTORUN_TEST_STATE_DIR="$SB/state" UV_CACHE_DIR="$SB/uv-cache"`
 - **Launch the checkout CLI:** `uv run --project plugins/autorun python -m autorun --status`; restart only its daemon with `uv run --project plugins/autorun python -m autorun --restart-daemon`.
 - **Install a local development CLI:** `uv tool install --force --editable plugins/autorun && autorun --install`; the editable install is for the developer CLI/daemon, not the live hook venv.
-- **Install a published release:** `uv tool install --force autorun && autorun --install` (use the git or marketplace commands below when the release is not on PyPI).
+- **Install a published release:** `uv tool install --force autorun-ai && autorun --install` (use the git or marketplace commands below when the release is not on PyPI). The distribution is `autorun-ai`; the command, the import package and the marketplace plugin are all still `autorun`.
 - **Repair the live Claude cache after refreshing assets:** `CACHE="$HOME/.claude/plugins/cache/autorun/ar/1.0.0rc1" && uv run --project plugins/autorun python -m autorun --install --force && uv venv --clear --python 3.13 "$CACHE/.venv" && uv pip install --python "$CACHE/.venv/bin/python" --reinstall "$PWD/plugins/autorun" && uv run --project plugins/autorun python -m autorun --restart-daemon`. Use this only after explicit current-turn approval; refresh first, repair the cache venv second, and restart last.
 - **Cache invariant:** the hook interpreter must import from `"$CACHE/.venv/lib/python*/site-packages"`; install it with `uv pip install --python "$CACHE/.venv/bin/python" --reinstall ...`, never `--editable`, so checkout edits cannot change the live hook between repairs.
 
@@ -64,6 +64,22 @@ installer-specific traps: [`plugins/autorun/src/autorun/installer/AGENTS.md`](pl
 
 ## 3. What is here
 
+**Three names, and no fourth.** `autorun` is the console script, the import
+package, the marketplace, the repo and `~/.autorun/`. `ar` is the plugin id and
+therefore the `/ar:` prefix — deliberately short so it types fast, namespaced by
+the marketplace and never by PyPI. `autorun-ai` is **only** the PyPI
+distribution, and only because PyPI prohibits the bare name ("This project name
+isn't allowed"). Write `autorun-ai` just where a *distribution* is named:
+install commands, `[project] name`, `[tool.uv.sources]` keys, dependency
+requirements, `uv build --package`, and `importlib.metadata.version(...)` — the
+last four fail silently rather than loudly when missed.
+
+The wheel is `autorun_ai-*.whl`, but that is **not** a fourth name to write:
+nothing declares it, PEP 427 just normalises `-` to `_`. Derive it
+(`DISTRIBUTION.replace("-", "_")`). `test_each_autorun_spelling_keeps_its_own_job`
+pins all of the above, including that no module spells the stem out and that the
+plugin id stays `ar`.
+
 UV workspace with two harness plugins: **autorun** (`/ar:` — autonomous
 execution with three-stage verification, file policies, safety guards, task
 tracking, plan export) and **pdf-extractor** (`/pdf-extractor:extract`,
@@ -75,7 +91,7 @@ family; standalone Gemini CLI is retired but installable with `--gemini`.
 | `plugins/autorun/src/autorun/` | Package: `config.py` (all CONFIG), `__main__.py` (CLI + hook routing), `plugins.py` (command handlers), `core.py`/`session_manager.py` (daemon state), `installer/` (install walk), `task_lifecycle.py`, `plan_export.py`, `cache_guard.py`, `integrations.py` |
 | `plugins/autorun/{commands,skills,agents,hooks}/` | Slash commands, skills, tmux agents, `hooks/hook_entry.py` + `hooks.json` |
 | `plugins/autorun/AGENTS.md` | Plugin development guidance: hook error prevention, feature lessons, bug-workaround policy, harness families |
-| `plugins/pdf-extractor/` | Manifests, command, skill, `CLAUDE.md` (full docs), and `src/pdf_extraction` (symlinked into `plugins/autorun/src/` so it ships in the `autorun` distribution; backends beyond `pdftotext` need the `pdf` extra) |
+| `plugins/pdf-extractor/` | Manifests, command, skill, `CLAUDE.md` (full docs), and `src/pdf_extraction` (symlinked into `plugins/autorun/src/` so it ships in the `autorun-ai` distribution; backends beyond `pdftotext` need the `pdf` extra) |
 | `README.md` | User documentation: installation, every `/ar:` command, three-stage markers, safety-guard defaults, tmux integration, troubleshooting |
 
 `/ar:help` lists every command in the current harness's spelling. Stage
@@ -110,12 +126,12 @@ gate; `tests/test_real_money_gate.py` fails if a second copy appears.
 every detected harness's native assets. In priority order:
 
 ```bash
-uv tool install --force autorun && autorun --install                                      # PyPI release
+uv tool install --force autorun-ai && autorun --install                                   # PyPI release
 uv tool install --force 'git+https://github.com/ahundt/autorun.git#subdirectory=plugins/autorun' && autorun --install   # git
 git clone https://github.com/ahundt/autorun.git && cd autorun && uv tool install --force --editable plugins/autorun && autorun --install   # local clone
 ```
 
 Claude Code alone can instead use the marketplace: `claude plugin marketplace
 add https://github.com/ahundt/autorun.git && claude plugin install ar@autorun`.
-Full options, extras (`autorun[pdf]`), and verification: `README.md`. Inside a
+Full options, extras (`autorun-ai[pdf]`), and verification: `README.md`. Inside a
 development session these commands fall under section 1.

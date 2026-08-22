@@ -38,9 +38,11 @@ dev = [
     "mypy>=1.0.0",
     "ruff>=0.14.1",
 ]
-# One distribution. PDF extraction is `autorun[pdf]`, not a second package.
+# One distribution. PDF extraction is `autorun-ai[pdf]`, not a second package.
+# The requirement names the *distribution*, so it must track the rename or
+# `uv lock` reports "autorun-workspace[all]'s requirements are unsatisfiable".
 all = [
-    "autorun[pdf,pdf-gpu,pdf-llm,pdf-progress]>=0.10.0",
+    "autorun-ai[pdf,pdf-gpu,pdf-llm,pdf-progress]>=0.10.0",
 ]
 
 # NO [project.scripts] - scripts come from plugins/autorun/pyproject.toml
@@ -69,7 +71,12 @@ members = [
 ]
 
 [tool.uv.sources]
-autorun = { workspace = true }
+# Key must be the member's *distribution* name, which is "autorun-ai" even
+# though the directory, the import package and the console script are all
+# "autorun". Spelling the directory name here resolves the member from PyPI
+# instead of the local tree, which
+# test_the_pdf_plugin_ships_inside_autorun_and_not_beside_it asserts against.
+autorun-ai = { workspace = true }
 
 # Minimal stub package for UV workspace
 [tool.hatch.build.targets.wheel]

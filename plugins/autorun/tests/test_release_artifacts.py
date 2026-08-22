@@ -30,6 +30,21 @@ pytestmark = [
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SOURCE_DATE_EPOCH = "1700000000"
 
+#: The distribution. Everything else about this project is spelled `autorun`
+#: (console script, import package, marketplace) or `ar` (plugin id, `/ar:`
+#: prefix); only PyPI needed a different name, because it prohibits the bare
+#: one. Not parsed from pyproject here on purpose: `tomllib` is not stdlib
+#: before 3.11 and CI runs 3.10, so a module-scope parse is a collection error
+#: on that job. `test_each_autorun_spelling_keeps_its_own_job` pins this
+#: constant against the declared name instead, so the two cannot drift.
+DISTRIBUTION = "autorun-ai"
+
+#: The wheel filename stem. PEP 427 normalises "-" to "_", so this is derived
+#: rather than written out: a literal `autorun_ai` would be a *fourth* spelling
+#: to keep in sync, for no gain -- nothing declares it, the build backend just
+#: emits it.
+WHEEL_STEM = DISTRIBUTION.replace("-", "_")
+
 
 def _run(argv, *, cwd: Path, env: dict[str, str] | None = None, timeout=180):
     result = subprocess.run(
@@ -138,8 +153,8 @@ def test_release_archives_repeat_bytes_in_one_toolchain_and_are_clean(release_bu
     assert first == second
 
     wheels = sorted(builds[0].glob("*.whl"))
-    assert [path.name.split("-")[0] for path in wheels] == ["autorun"], (
-        "a second distribution reappeared; pdf_extraction ships inside autorun"
+    assert [path.name.split("-")[0] for path in wheels] == [WHEEL_STEM], (
+        f"a second distribution reappeared; pdf_extraction ships inside {DISTRIBUTION}"
     )
     autorun_wheel = wheels[0]
     with zipfile.ZipFile(autorun_wheel) as archive:
@@ -213,7 +228,7 @@ def _venv(
 
 def test_autorun_wheel_install_status_bootstrap_and_uninstall(release_bundle):
     root, _checkout, _commit, env, builds = release_bundle
-    wheel = next(builds[0].glob("autorun-*.whl"))
+    wheel = next(builds[0].glob(f"{WHEEL_STEM}-*.whl"))
     scripts, isolated = _venv(root, wheel, env, label="cli")
     autorun = scripts / ("autorun.exe" if os.name == "nt" else "autorun")
 
@@ -269,7 +284,7 @@ def test_pdf_help_and_backend_inventory_are_lightweight(release_bundle):
     CLI still has to run and report what is missing rather than fail on import.
     """
     root, _checkout, _commit, env, builds = release_bundle
-    wheel = next(builds[0].glob("autorun-*.whl"))
+    wheel = next(builds[0].glob(f"{WHEEL_STEM}-*.whl"))
     with zipfile.ZipFile(wheel) as archive:
         metadata_name = next(
             name for name in archive.namelist() if name.endswith(".dist-info/METADATA")

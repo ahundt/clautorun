@@ -42,7 +42,15 @@ _FALLBACK_PLUGINS = ("ar", "pdf-extractor")
 _ALIASES = {"autorun": "ar"}
 _run = runtime._spawn
 
+# Distribution -> a console script it provides, used to decide whether this home
+# owns a uv tool install. Keyed by *distribution*, so the current name and every
+# retired one need an entry: `_uv_tool_installed` indexes this directly and a
+# missing key raises KeyError rather than answering "not owned".
+#
+# "autorun" is kept alongside "autorun-ai" because a pre-rename install can
+# still be present and must remain classifiable.
 _UV_TOOL_SCRIPTS = {
+    "autorun-ai": "autorun",
     "autorun": "autorun",
     "autorun-pdf-extractor": "extract-pdfs",
     "pdf-extractor": "extract-pdfs",
@@ -62,7 +70,27 @@ _UV_TOOL_SCRIPTS = {
 # the shared name to whichever tool installed last, so the environment is
 # invisible from the CLI while still occupying its full size on disk.
 _PLUGIN_DISTRIBUTIONS = {
-    "ar": ("autorun", "autorun-pdf-extractor", "pdf-extractor"),
+    # [0] is the distribution this tree publishes; [1:] are names it has used
+    # before and must retire. The distribution is "autorun-ai" because PyPI
+    # prohibits the bare name ("This project name isn't allowed"); the console
+    # script stayed `autorun`.
+    #
+    # "autorun" is deliberately absent from [1:]. Retiring a distribution that shares
+    # console scripts with the current one removes those scripts:
+    # `uv tool uninstall autorun` deletes `autorun`, `autorun-install` and
+    # `extract-pdfs` by name even though "autorun-ai" provides all three, and a
+    # measured upgrade then ended with the new distribution installed and no
+    # `autorun` command. `runtime.ensure_cli_entry_points` was added to repair
+    # exactly that, and in isolation it does -- but with the sweep enabled the
+    # upgrade still finished with an empty bin directory and the repair never
+    # reported, so the sweep is not yet safe to enable and the cause is not yet
+    # established. Retiring costs the command; the orphan costs disk.
+    #
+    # Survivable because "autorun" was never published to PyPI: only git and
+    # local installs can hold it, and installing "autorun-ai" hands the shared
+    # scripts to the newer tool -- measured, `autorun --version` afterwards
+    # resolves to `.../tool/autorun-ai/bin/autorun`.
+    "ar": ("autorun-ai", "autorun-pdf-extractor", "pdf-extractor"),
 }
 
 
@@ -546,6 +574,17 @@ def install_plugins(
         restarted = runtime.restart_daemon(run=_run)
         print(restarted.describe())
         ok = restarted.ok
+    # Dead last, after every step that can remove a console script. Retiring a
+    # legacy distribution deletes entry points the current one still owns, and
+    # measurement put that deletion later than it reads: checking right after
+    # the CLI install, and again after `orchestrate.install`, both found the
+    # scripts present while the walk still finished with an empty bin directory.
+    # Rather than keep chasing which step removes them, verify the property that
+    # matters where nothing can undo it. Silent when nothing is missing.
+    if not dry_run and "ar" in plugins and plugin is not None and resolved["tool"]:
+        if repair := runtime.ensure_cli_entry_points(plugin, run=_run):
+            print(repair.describe())
+            ok = ok and repair.ok
     return 0 if ok else 1
 
 
@@ -772,7 +811,10 @@ def _latest_version(current: str) -> str:
 def perform_self_update(method: str = "auto") -> runtime.Outcome:
     """Update through the detected installation route."""
     try:
-        current = version("autorun")
+        # The *distribution* name, not the import package: `version("autorun")`
+        # raises PackageNotFoundError after the rename and degrades silently to
+        # "unknown", which compares as older than every release tag.
+        current = version(_PLUGIN_DISTRIBUTIONS["ar"][0])
     except PackageNotFoundError:
         current = "unknown"
     extension_name = runtime.installed_extension_name(discovery.extensions_dir(PLATFORMS["gemini"]) or Path())

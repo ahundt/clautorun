@@ -3,8 +3,13 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-# Project name is "autorun" - the plugin uses "ar" as command prefix for ergonomic typing
-name = "autorun"
+# The distribution is "autorun-ai"; the project, the console script, the import
+# package and the marketplace plugin are all still "autorun", and the harness
+# command prefix is "ar". PyPI prohibits the bare name "autorun" -- registering
+# it returns "This project name isn't allowed", the wording reserved for names
+# blocked by administrators, most plausibly because `autorun` collides with the
+# Windows autorun.inf convention. Only the PyPI-facing name moved.
+name = "autorun-ai"
 version = "1.0.0rc1"
 description = "Task lifecycle and safety hooks for AI coding harnesses"
 readme = {file = "README.md", content-type = "text/markdown"}
@@ -83,7 +88,8 @@ pdf-gpu = [
 pdf-llm = ["pymupdf4llm>=0.0.1"]
 # extractors.py falls back to a no-op progress bar when tqdm is absent.
 pdf-progress = ["tqdm>=4.60.0"]
-pdf-all = ["autorun[pdf,pdf-gpu,pdf-llm,pdf-progress]"]
+# A self-referential extra names this distribution, so it tracks the rename.
+pdf-all = ["autorun-ai[pdf,pdf-gpu,pdf-llm,pdf-progress]"]
 # There is no `dev` extra. The dev environment is `[dependency-groups].dev`
 # below, which uv includes by default in `uv run` and `uv sync`. Publishing a
 # second one drifted immediately: the extra floored pytest at 7 and shipped

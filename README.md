@@ -23,8 +23,9 @@
 ## Quick Start
 
 ```bash
-# Install the published package with UV
-uv tool install autorun
+# Install the published package with UV. The distribution is `autorun-ai`;
+# the command it installs is `autorun`, and the harness commands are `/ar:*`.
+uv tool install autorun-ai
 autorun --install
 
 # Verify installation
@@ -123,7 +124,7 @@ checkout. Its extraction code needs no separate package — see below.
 `autorun` is the only published distribution. Install a release from PyPI:
 
 ```bash
-uv tool install autorun
+uv tool install autorun-ai
 autorun --install
 ```
 
@@ -131,7 +132,7 @@ PDF extraction ships inside it. `extract-pdfs` is always present, and every
 extraction backend is optional, so nobody who never opens a PDF downloads one:
 
 ```bash
-uv tool install --force 'autorun[pdf]'
+uv tool install --force 'autorun-ai[pdf]'
 extract-pdfs --list-backends
 ```
 

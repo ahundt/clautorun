@@ -111,7 +111,7 @@ After running this script:
 13. [DONE] Manual: git mv plugins/autorun/commands/clautorun → commands/autorun + fix contents (item 10 above)
 14. [DONE] Manual: Update plugins/autorun/Makefile echo string (item 11 above)
 15. [DONE] Manual: Moved src/clautorun/ → src/autorun/ (item 12 above)
-16. [TODO] Version bump: 0.8.0 → 0.9.0 in all version locations (see docs/version_update_checklist.md)
+16. [TODO] Version bump: 0.8.0 → 0.9.0 in all version locations (see RELEASING.md)
 
 SCRIPT DESIGN RATIONALE:
 ================================================================================

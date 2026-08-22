@@ -57,7 +57,7 @@ To extract text from PDFs:
 If the `extract-pdfs` CLI isn't installed, install it first (recommended):
 
 ```bash
-# Install as global UV tool (from repo root); the code ships in the autorun distribution:
+# Install as global UV tool (from repo root); the code ships in the autorun-ai distribution:
 cd "${CLAUDE_PLUGIN_ROOT}/../.." && uv tool install --force --editable "./plugins/autorun[pdf]"
 extract-pdfs --list-backends  # verify
 ```
@@ -248,7 +248,7 @@ The output will contain markdown tables when detected:
 **Location:** `plugins/pdf-extractor/src/pdf_extraction/` in a source checkout, and the
 importable `pdf_extraction` package once `autorun` is installed. This plugin
 directory holds the manifest, command, and this skill; the code ships inside the
-`autorun` distribution behind its `pdf` extra.
+`autorun-ai` distribution behind its `pdf` extra.
 
 | File | Purpose |
 |------|---------|

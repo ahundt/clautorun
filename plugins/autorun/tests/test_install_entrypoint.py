@@ -335,11 +335,24 @@ def test_removing_the_pdf_plugin_never_reaches_a_python_distribution(isolated):
     from autorun.installer import entrypoint
 
     assert "pdf-extractor" not in entrypoint._PLUGIN_DISTRIBUTIONS
-    assert entrypoint._PLUGIN_DISTRIBUTIONS["ar"][0] == "autorun"
+    # The distribution is "autorun-ai": PyPI prohibits the bare name. The
+    # console script, the import package and the plugin id are unchanged.
+    assert entrypoint._PLUGIN_DISTRIBUTIONS["ar"][0] == "autorun-ai"
     assert set(entrypoint._PLUGIN_DISTRIBUTIONS["ar"][1:]) == {
         "autorun-pdf-extractor",
         "pdf-extractor",
     }
+
+    # Every distribution named here is fed to `_uv_tool_installed`, which
+    # indexes `_UV_TOOL_SCRIPTS` directly. A missing key raises KeyError instead
+    # of answering "this home does not own it" -- which is exactly what the
+    # rename caused until "autorun-ai" was added. Retired names stay mapped too,
+    # because a pre-rename install must remain classifiable.
+    for distribution in entrypoint._PLUGIN_DISTRIBUTIONS["ar"]:
+        assert distribution in entrypoint._UV_TOOL_SCRIPTS, (
+            f"{distribution!r} is swept but has no console script mapped, so "
+            f"_uv_tool_installed({distribution!r}) raises KeyError"
+        )
 
 
 def test_uninstall_keeps_stable_publication_lock_files(tmp_path):
@@ -1024,6 +1037,6 @@ def test_partial_uninstall_of_pdf_preserves_every_autorun_artifact(monkeypatch, 
     assert entrypoint.uninstall_plugins("pdf-extractor") == 0
     assert agents.is_file() and hooks.is_file() and package.is_dir()
     # Removing the pdf plugin moves harness files only. Its code ships inside
-    # the `autorun` distribution, which also carries autorun's own CLI, so
+    # the `autorun-ai` distribution, which also carries autorun's own CLI, so
     # reaching any package here would uninstall the tool the user kept.
     assert not [call for call in calls if "uninstall" in call and "tool" in call], calls

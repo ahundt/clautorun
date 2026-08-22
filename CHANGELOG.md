@@ -207,7 +207,7 @@ marketplace itself carries a separate `version` field.
   of zero, so `make ci` installed nothing and said nothing. Every target is now
   a thin alias over the `uv` commands CI and the release checklist already use,
   including CI's exact marker selection and its two `ruff` passes.
-- **Every `uv run` in `docs/version_update_checklist.md` passes `--locked`.**
+- **Every `uv run` in `RELEASING.md` passes `--locked`.**
   The rule that a candidate is validated against the graph `uv.lock` commits
   applied to CI alone, so a maintainer's pre-flight — the full suite, the
   artifact build, the benchmark, the post-install cache check — could resolve a
@@ -428,10 +428,13 @@ marketplace itself carries a separate `version` field.
 - **Cross-process message-claim test carries a hook deadline.** Without one,
   the first contended store-lock attempt fails open by design and slow
   Windows runners saw two claim winners.
-- **PyPI publishing through one distribution.** `autorun` is the only published
-  package. PDF extraction ships inside it: `pdf_extraction` and the
+- **PyPI publishing through one distribution.** `autorun-ai` is the only
+  published package — PyPI prohibits the bare name `autorun`, so the packaging
+  name carries the `-ai` suffix while the command, the import package, the
+  marketplace plugin and the `/ar:` prefix are all unchanged. PDF extraction
+  ships inside it: `pdf_extraction` and the
   `extract-pdfs` script are always present, and every extraction backend is an
-  optional extra, so `autorun[pdf]` is the ordinary PDF install and nobody else
+  optional extra, so `autorun-ai[pdf]` is the ordinary PDF install and nobody else
   downloads an extraction library. `pdf-extractor` remains a separate plugin in
   every harness — its own manifest, command, and skill — it is simply not a
   separate Python package. The remaining extras are `pdf-gpu`, `pdf-llm`,

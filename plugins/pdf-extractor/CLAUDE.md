@@ -34,12 +34,12 @@ ForgeCode, Pi, and Prime Agent load `$pdf-extractor` through the shared
 ### Using uv tool install (Recommended — makes extract-pdfs globally available)
 
 There is no separate package. `extract-pdfs` and the `pdf_extraction` module
-ship inside the `autorun` distribution, and every extraction backend lives in an
+ship inside the `autorun-ai` distribution, and every extraction backend lives in an
 optional extra, so name the ones you want. `pdf` gets the CPU backends and is
 the ordinary choice:
 
 ```bash
-uv tool install 'autorun[pdf]'
+uv tool install 'autorun-ai[pdf]'
 extract-pdfs --list-backends
 ```
 

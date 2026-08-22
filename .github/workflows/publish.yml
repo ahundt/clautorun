@@ -78,7 +78,7 @@ jobs:
           echo "autorun $declared matches tag v$tag_version"
 
       - name: Build sdist and wheel
-        run: uv build --package autorun --out-dir dist
+        run: uv build --package autorun-ai --out-dir dist
 
       - name: Verify one wheel carries both packages and both entry points
         # The pdf plugin has no pyproject of its own, so nothing else would
@@ -86,9 +86,19 @@ jobs:
         # distribution reappeared. Publishing either mistake is permanent.
         run: |
           uv run --no-project python - <<'PY'
-          import pathlib, zipfile
+          import pathlib, tomllib, zipfile
+          # PEP 427 normalises "-" to "_" in wheel filenames. Derive that stem
+          # from the declared distribution instead of spelling it: a written-out
+          # `autorun_ai` is a second name to keep in sync, and this is the worst
+          # place to discover a mismatch, since the job asserts after the build
+          # it is guarding.
+          distribution = tomllib.load(
+              open("plugins/autorun/pyproject.toml", "rb")
+          )["project"]["name"]
           wheels = sorted(pathlib.Path("dist").glob("*.whl"))
-          assert [w.name.split("-")[0] for w in wheels] == ["autorun"], wheels
+          assert [w.name.split("-")[0] for w in wheels] == [
+              distribution.replace("-", "_")
+          ], (wheels, distribution)
           with zipfile.ZipFile(wheels[0]) as archive:
               names = archive.namelist()
               entry = next(n for n in names if n.endswith(".dist-info/entry_points.txt"))

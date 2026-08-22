@@ -5,7 +5,7 @@ native integration assets for AI coding harnesses. It is the only Python
 distribution here, and it contains the complete `ar` plugin plus the `autorun`
 and `autorun-install` entry points. `pdf-extractor` remains a separate harness
 plugin, but not a separate package: its extraction code ships inside this
-distribution, so install it with `uv tool install 'autorun[pdf]'`.
+distribution, so install it with `uv tool install 'autorun-ai[pdf]'`.
 
 ## Install
 
@@ -13,7 +13,7 @@ Install the published Python tool, then publish native assets for the harnesses
 detected on the machine:
 
 ```bash
-uv tool install autorun
+uv tool install autorun-ai
 autorun --install
 autorun --status
 ```

@@ -282,6 +282,53 @@ def test_release_checklist_names_only_files_that_exist():
     )
 
 
+_TAG_COMMAND_RE = re.compile(r"^\s*git tag -a .*$", re.MULTILINE)
+
+
+def test_release_checklist_tags_without_stripping_markdown_headings():
+    """`git tag -a -F notes.md` deletes every line of the notes that starts with #.
+
+    Stage 4 exists so "the annotated tag carries the release body, so `git show`
+    gives the notes to anyone with a clone". The plain `-F` form cannot deliver
+    that: git's default `--cleanup=strip` treats a leading `#` as a comment, so
+    it silently drops the title, every `##` section heading, and even the `#`
+    comments inside the install code block, then collapses blank runs.
+
+    The first release tagged under this runbook used the plain form and lost all
+    ten of its `#` lines, 155 source lines arriving as 137. Nothing failed: the
+    tag was created, the push succeeded, and the damage is visible only by
+    diffing the annotation against the file. The published GitHub Release was
+    unaffected because its body comes from `--notes-file` at creation time,
+    which is why this can rot unnoticed across releases.
+
+    The second assertion keeps the first honest. Checking only for the flag
+    would keep passing if the notes ever stopped containing `#` lines, and would
+    then be a gate for a property nothing depends on.
+    """
+    text = _CHECKLIST.read_text(encoding="utf-8")
+    tag_commands = [c.strip() for c in _TAG_COMMAND_RE.findall(text)]
+    assert tag_commands, "RELEASING.md documents no `git tag -a` command"
+
+    unsafe = [
+        c for c in tag_commands if "-F" in c.split() and "--cleanup=verbatim" not in c
+    ]
+    assert not unsafe, (
+        "RELEASING.md tags from a notes file without --cleanup=verbatim, so git "
+        "will delete every Markdown heading from the annotation:\n  "
+        + "\n  ".join(unsafe)
+    )
+
+    notes = sorted((REPO_ROOT / "docs" / "releases").glob("*.md"))
+    assert notes, "no release notes found to protect"
+    hashed = [n.name for n in notes if any(
+        line.startswith("#") for line in n.read_text(encoding="utf-8").splitlines()
+    )]
+    assert hashed, (
+        "no release-notes file starts a line with '#', so the --cleanup=verbatim "
+        "requirement above now guards nothing and should be re-derived"
+    )
+
+
 _FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.*?)\s*$", re.MULTILINE)
 _SAME_FILE_LINK_RE = re.compile(r"\[[^\]]+\]\(#([^)]+)\)")

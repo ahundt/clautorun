@@ -296,9 +296,28 @@ release_tag="v$release_version"
 
 # -F, not -m: the annotated tag carries the release body, so `git show` gives the
 # notes to anyone with a clone and they do not live only on GitHub.
-git tag -a "$release_tag" "$release_sha" -F "docs/releases/$release_version.md"
+#
+# --cleanup=verbatim is what makes that true. git's default for -F is
+# --cleanup=strip, which reads a leading '#' as a comment and deletes the line,
+# so plain -F silently removes the title, every '##' section heading, and the
+# '#' comments inside the install snippet, then collapses blank runs. Measured
+# on this file: 155 lines in, 137 out, all 10 '#' lines gone. With verbatim the
+# annotation is byte-identical to the source.
+git tag -a "$release_tag" "$release_sha" --cleanup=verbatim \
+  -F "docs/releases/$release_version.md"
+
+# Prove the round trip before pushing, while the tag is still local and cheap to
+# redo. After the push the recovery table forbids moving it.
+diff <(git cat-file tag "$release_tag" | sed -n '6,$p') \
+     "docs/releases/$release_version.md"
+
 git push origin "$release_tag"
 ```
+
+The first tag pushed under this runbook predates that flag, so its annotation is
+the stripped form. It was left alone rather than retagged: the commit under it is
+correct, the published release body comes from `--notes-file` and is unaffected,
+and moving a pushed tag is the one thing the recovery table below rules out.
 
 ### Stage 5: Verify the tag, then approve the tag run — **RELEASER public write**
 

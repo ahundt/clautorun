@@ -282,7 +282,21 @@ def test_release_checklist_names_only_files_that_exist():
     )
 
 
+_LINE_CONTINUATION_RE = re.compile(r"\\\s*\n\s*")
 _TAG_COMMAND_RE = re.compile(r"^\s*git tag -a .*$", re.MULTILINE)
+
+
+def _shell_commands(text: str) -> list[str]:
+    r"""Join backslash line continuations so one command is one string.
+
+    Matching physical lines is what a first version of the caller below did, and
+    it silently stopped checking anything the moment the documented command grew
+    long enough to wrap: `-F` moved to the continuation line, the flag test
+    looked only at line one, and the gate reported success while inspecting half
+    a command. It would equally have missed a real `-F` sitting on a
+    continuation line, which is the failure it exists to catch.
+    """
+    return _LINE_CONTINUATION_RE.sub(" ", text).splitlines()
 
 
 def test_release_checklist_tags_without_stripping_markdown_headings():
@@ -305,13 +319,17 @@ def test_release_checklist_tags_without_stripping_markdown_headings():
     would keep passing if the notes ever stopped containing `#` lines, and would
     then be a gate for a property nothing depends on.
     """
-    text = _CHECKLIST.read_text(encoding="utf-8")
-    tag_commands = [c.strip() for c in _TAG_COMMAND_RE.findall(text)]
+    joined = "\n".join(_shell_commands(_CHECKLIST.read_text(encoding="utf-8")))
+    tag_commands = [c.strip() for c in _TAG_COMMAND_RE.findall(joined)]
     assert tag_commands, "RELEASING.md documents no `git tag -a` command"
 
-    unsafe = [
-        c for c in tag_commands if "-F" in c.split() and "--cleanup=verbatim" not in c
-    ]
+    from_file = [c for c in tag_commands if "-F" in c.split()]
+    assert from_file, (
+        "RELEASING.md documents `git tag -a` but never with -F, so the annotated "
+        "tag no longer carries the release body this check protects"
+    )
+
+    unsafe = [c for c in from_file if "--cleanup=verbatim" not in c]
     assert not unsafe, (
         "RELEASING.md tags from a notes file without --cleanup=verbatim, so git "
         "will delete every Markdown heading from the annotation:\n  "

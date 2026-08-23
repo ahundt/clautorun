@@ -149,6 +149,48 @@ jobs:
           # A rerun of the same tag would otherwise fail on files TestPyPI
           # already has. PyPI below stays strict.
           skip-existing: true
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          python-version: '3.12'
+      - name: Install the rehearsed distribution from TestPyPI and run its CLI
+        # An accepted upload is a weaker property than an installable wheel, and
+        # the difference is what a rehearsal exists to catch -- the next job
+        # writes to PyPI, where a version is immutable and a bad wheel costs a
+        # new version rather than a re-upload.
+        #
+        # The version comes from the built wheel, not from `${GITHUB_REF_NAME#v}`:
+        # this job also runs on `workflow_dispatch`, where the ref name is the
+        # branch and that expression would ask TestPyPI for `autorun-ai==main`.
+        #
+        # TestPyPI is the primary index and PyPI stays available for the rest.
+        # Restricting to TestPyPI alone would be a stronger check, but autorun-ai
+        # has five real runtime dependencies (bashlex, filelock, packaging,
+        # psutil, pyyaml) that only PyPI carries, so it would fail on those
+        # rather than on anything about this wheel. These are the same two index
+        # flags RELEASING.md gives for the manual rehearsal, so the automated
+        # check and the documented command cannot diverge.
+        #
+        # TestPyPI's simple index trails the upload by seconds, hence the retry.
+        run: |
+          set -euo pipefail
+          wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "$wheel"
+          version=$(basename "$wheel" | cut -d- -f2)
+          echo "rehearsing autorun-ai==${version}"
+          export AUTORUN_HOME="${RUNNER_TEMP}/ar-home"
+          for attempt in 1 2 3 4 5 6; do
+            if uv run --isolated --no-project \
+              --index-url https://test.pypi.org/simple/ \
+              --extra-index-url https://pypi.org/simple/ \
+              --with "autorun-ai==${version}" autorun --version; then
+              exit 0
+            fi
+            echo "attempt ${attempt} failed; TestPyPI index may still be catching up"
+            sleep 20
+          done
+          echo "::error::autorun-ai ${version} did not install from TestPyPI"
+          exit 1
 
   publish-pypi:
     needs: publish-testpypi

@@ -72,6 +72,19 @@ test "$names" = "pypi testpypi"
 The GitHub API cannot confirm pending-publisher records on PyPI. The releaser
 must verify both records in the two account pages before continuing.
 
+**"Pending publishers" is the first-upload path only.** Once an upload creates
+the project, the record becomes an ordinary publisher on the project itself and
+nothing appears under Pending any more, so a later release that follows this
+section looking for it finds an empty page and no explanation. After the first
+publication, read the recorded identity from the file's provenance instead. It
+needs no login and returns the repository, workflow and environment PyPI
+actually accepted:
+
+```bash
+curl -sS "https://pypi.org/integrity/autorun-ai/$release_version/autorun_ai-$release_version-py3-none-any.whl/provenance" \
+  | python3 -c 'import json,sys; a=json.load(sys.stdin)["attestation_bundles"][0]["publisher"]; print(a)'
+```
+
 ## Release Workflow
 
 Every public write below is marked **RELEASER**. Do not push, tag, or create a
@@ -263,14 +276,49 @@ release_version=$(rg -N -o -r '$1' '^version = "(.+)"' plugins/autorun/pyproject
 test -n "$release_version"
 release_tag="v$release_version"
 
-git tag -a "$release_tag" "$release_sha" -m "autorun $release_tag"
+# -F, not -m: the annotated tag carries the release body, so `git show` gives the
+# notes to anyone with a clone and they do not live only on GitHub.
+git tag -a "$release_tag" "$release_sha" -F "docs/releases/$release_version.md"
 git push origin "$release_tag"
 ```
 
-### Stage 5: Verify tag is on the right commit
+### Stage 5: Verify the tag, then watch and approve the tag run
+
 ```bash
 test "$(git rev-list -n 1 "$release_tag")" = "$release_sha"
 test "$(git ls-remote origin "refs/tags/$release_tag^{}" | cut -f1)" = "$release_sha"
+```
+
+The tag push starts `publish.yml`, which runs CI, uploads to TestPyPI, installs
+the wheel back from TestPyPI, and then waits on the `pypi` environment's
+required reviewer. Approving is the irreversible half of the release: PyPI
+versions are immutable, so inspect the run first.
+
+Browser: <https://github.com/ahundt/autorun/actions/workflows/publish.yml>, open
+the tag run, and use "Review deployments" on the `pypi` job.
+
+Commands, for inspection and for repeating the same step without the browser.
+The approval call needs a token carrying `repo` and `workflow` scope;
+`current_user_can_approve` tells you before you post whether it will work.
+
+```bash
+run_id=$(gh run list --workflow publish.yml --branch "$release_tag" \
+  --limit 1 --json databaseId --jq '.[0].databaseId')
+gh run view "$run_id"                      # which jobs passed, which is waiting
+gh run view "$run_id" --log --job \
+  "$(gh run view "$run_id" --json jobs \
+     --jq '.jobs[] | select(.name|test("testpypi")) | .databaseId')"
+
+# What is pending, and whether you may approve it.
+gh api "repos/ahundt/autorun/actions/runs/$run_id/pending_deployments" \
+  --jq '.[] | {environment: .environment.name, can_approve: .current_user_can_approve}'
+
+# Approve, naming the environment id the call above reported.
+env_id=$(gh api "repos/ahundt/autorun/actions/runs/$run_id/pending_deployments" \
+  --jq '.[] | select(.environment.name=="pypi") | .environment.id')
+gh api --method POST \
+  "repos/ahundt/autorun/actions/runs/$run_id/pending_deployments" \
+  -f state=approved -F "environment_ids[]=$env_id" -f comment="rc verified"
 ```
 
 ### Stage 6: Create GitHub prerelease — **RELEASER public write**

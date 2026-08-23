@@ -1256,3 +1256,42 @@ def test_publishing_jobs_state_their_own_precondition():
         "a publishing job can be skipped by a skipped ancestor while the run "
         "still reports success:\n  " + "\n  ".join(inherited)
     )
+
+
+def test_the_testpypi_rehearsal_installs_the_wheel_it_uploaded():
+    """The rehearsal must prove the wheel installs, not that bytes were accepted.
+
+    Stated as the violation: a `publish-testpypi` job whose only action is an
+    upload. TestPyPI accepting a file says nothing about whether the wheel
+    resolves, whether its console scripts exist, or whether it imports -- and
+    the very next job writes to PyPI, where a version is immutable, so a wheel
+    problem found afterwards costs a new version rather than a re-upload.
+
+    Both halves are asserted because either alone is satisfiable while the
+    release still publishes unrehearsed bytes: an install step that never runs
+    the CLI proves resolution only, and a CLI invocation that resolves from
+    PyPI would pass even if nothing had been uploaded.
+
+    Learned from ai-session-search, whose rehearsal had the same shape.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["publish-testpypi"]["steps"]
+    scripts = "\n".join(str(step.get("run", "")) for step in steps)
+
+    assert "test.pypi.org/simple" in scripts, (
+        "publish-testpypi never installs from the index it just uploaded to, so "
+        "a green rehearsal proves only that TestPyPI accepted the bytes"
+    )
+    assert re.search(r"\bautorun --version\b", scripts), (
+        "publish-testpypi installs the wheel but never runs the console script, "
+        "so a distribution that resolves and cannot execute still reaches PyPI"
+    )
+    # The publish action itself is not a `run:` step, so its absence here would
+    # mean the upload was removed and only the verification remains.
+    assert any(
+        "pypi-publish" in str(step.get("uses", "")) for step in steps
+    ), "publish-testpypi no longer uploads anything"

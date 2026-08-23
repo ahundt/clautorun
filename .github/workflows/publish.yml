@@ -13,8 +13,12 @@
 #   Owner: ahundt   Repository: autorun   Workflow: publish.yml
 #   Environment: testpypi (on test.pypi.org) or pypi (on pypi.org)
 #
-#   test.pypi.org/manage/account/publishing/  -> autorun
-#   pypi.org/manage/account/publishing/       -> autorun
+#   test.pypi.org/manage/account/publishing/  -> autorun-ai
+#   pypi.org/manage/account/publishing/       -> autorun-ai
+#
+# The project name is `autorun-ai`, not `autorun`: PyPI refuses the bare name
+# ("This project name isn't allowed"), so registering that one registers
+# nothing. The repository stays `autorun`.
 #
 # Two ways to run:
 #   1. workflow_dispatch -> builds and publishes to TestPyPI only. Use this to
@@ -143,7 +147,7 @@ jobs:
           name: dist-autorun
           path: dist/
       - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           repository-url: https://test.pypi.org/legacy/
           # A rerun of the same tag would otherwise fail on files TestPyPI
@@ -216,4 +220,4 @@ jobs:
           name: dist-autorun
           path: dist/
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

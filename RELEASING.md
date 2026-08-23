@@ -313,24 +313,48 @@ required reviewer. Approving is the irreversible half of the release: PyPI
 versions are immutable, so inspect the run first.
 
 Browser: <https://github.com/ahundt/autorun/actions/workflows/publish.yml>, open
-the tag run, then **Review deployments** in the banner on the run page itself,
-not on the waiting job. Tick `pypi`, then **Approve and deploy**. These three
-labels come from GitHub's review-deployments documentation and are the only ones
-here not read off a live page: no tag has been pushed yet, so no run has ever
-waited on this repository. Treat the `pending_deployments` commands below as
-authoritative if the wording differs.
+the tag run. The run page carries a banner reading **"<owner> requested your
+review to deploy to pypi"** with a **Review deployments** button, and the parked
+job shows as `publish-pypi` / **"pypi waiting for review"**. Use the banner on
+the run page itself, not the waiting job. In the dialog it opens, tick `pypi`
+and choose **Approve and deploy**.
+
+Everything named above was read off the live gate on 2026-08-23, when
+`v1.0.0rc1` became the first tag to reach it. The dialog's own two labels are
+the exception and still come from GitHub's review-deployments documentation,
+because opening that dialog is a step the releaser takes, not one to rehearse.
+Treat the `pending_deployments` commands below as authoritative if the wording
+differs.
 
 Commands, for inspection and for repeating the same step without the browser.
 The approval call needs a token carrying `repo` and `workflow` scope;
 `current_user_can_approve` tells you before you post whether it will work.
 
+**Do not reach for `gh run view --log` here.** GitHub serves a run's logs only
+once the whole run is finished, and a run parked at this gate is by definition
+unfinished, so the request answers `run <id> is still in progress; logs will be
+available when it is complete`. Read the step conclusions instead, and prove the
+rehearsal against TestPyPI directly.
+
 ```bash
 run_id=$(gh run list --workflow publish.yml --branch "$release_tag" \
   --limit 1 --json databaseId --jq '.[0].databaseId')
 gh run view "$run_id"                      # which jobs passed, which is waiting
-gh run view "$run_id" --log --job \
-  "$(gh run view "$run_id" --json jobs \
-     --jq '.jobs[] | select(.name|test("testpypi")) | .databaseId')"
+
+# Which rehearsal steps ran, readable while the run is still parked.
+gh run view "$run_id" --json jobs --jq \
+  '.jobs[] | select(.name=="publish-testpypi") | .steps[] | "\(.conclusion)\t\(.name)"'
+
+# Stronger than any log line: install the rehearsed wheel and run its CLI. An
+# accepted upload only proves TestPyPI took the file.
+sandbox=$(mktemp -d /tmp/arv.XXXX)
+uv venv --python 3.13 "$sandbox/venv"
+uv pip install --python "$sandbox/venv/bin/python" \
+  --index-url https://test.pypi.org/simple/ \
+  --extra-index-url https://pypi.org/simple/ \
+  "autorun-ai==$release_version"
+env HOME="$sandbox/home" AUTORUN_HOME="$sandbox/ar-home" \
+  "$sandbox/venv/bin/autorun" --version   # expect $release_version
 
 # What is pending, and whether you may approve it.
 gh api "repos/ahundt/autorun/actions/runs/$run_id/pending_deployments" \
@@ -382,6 +406,17 @@ shortcut to it.
 
 Commands. Use the reviewed release draft, not generated notes, and make retries
 idempotent by inspecting first.
+
+**autorun blocks its own release command.** Every maintainer of this repository
+runs autorun, and its safety guard answers `gh release create` with `Command
+blocked: gh release create` / `The user requires explicit permission before
+creating releases`. That is the guard working, not a broken checklist, and it
+lands on an agent-driven release rather than on a human typing the command. Grant
+it for the attempt, or take the browser route above:
+
+```bash
+/ar:ok 'gh release create'
+```
 
 ```bash
 if gh release view "$release_tag" >/dev/null 2>&1; then

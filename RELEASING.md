@@ -314,7 +314,11 @@ versions are immutable, so inspect the run first.
 
 Browser: <https://github.com/ahundt/autorun/actions/workflows/publish.yml>, open
 the tag run, then **Review deployments** in the banner on the run page itself,
-not on the waiting job. Tick `pypi`, then **Approve and deploy**.
+not on the waiting job. Tick `pypi`, then **Approve and deploy**. These three
+labels come from GitHub's review-deployments documentation and are the only ones
+here not read off a live page: no tag has been pushed yet, so no run has ever
+waited on this repository. Treat the `pending_deployments` commands below as
+authoritative if the wording differs.
 
 Commands, for inspection and for repeating the same step without the browser.
 The approval call needs a token carrying `repo` and `workflow` scope;
@@ -354,12 +358,27 @@ install takes whatever `main` holds regardless of any release flag. Both halves
 are true at once: a stable user is not pulled onto an RC by the updater, while
 anyone installing from scratch during an RC window gets the RC.
 
-Browser: <https://github.com/ahundt/autorun/releases>, **Draft a new release**,
-pick the pushed tag from **Choose a tag** (never type a new one; the dropdown
-lists what exists, so the tag is confirmed by selecting it), paste
-`docs/releases/<version>.md` into the body, tick **This is a pre-release**, then
-**Publish release**. `gh release create` has no `--web` flag, so this is the
-route rather than a shortcut to it.
+Browser: <https://github.com/ahundt/autorun/releases/new> (or the **Draft a new
+release** button on the releases page). Labels below were read off the live form
+on 2026-08-22, because GitHub's own documentation for this page is stale: it
+describes a "This is a pre-release" checkbox that the form does not have.
+
+1. **Tag: Select tag** — pick the tag Stage 4 already pushed. The control will
+   also create a tag on publish ("Choose an existing tag, or create a new tag
+   when you publish this release"), and that is the one thing to avoid here: a
+   tag made this way is lightweight and carries none of the release body, which
+   is exactly what Stage 4's `git tag -a -F` exists to put in it.
+2. Confirm **Target: main**.
+3. Fill **Release title**, and paste `docs/releases/<version>.md` into
+   **Release description**. Leave **Generate release notes** alone; the reviewed
+   file is the source, not GitHub's commit summary.
+4. Under **Release label**, select the **Pre-release** radio rather than
+   **None**. It is a two-option radio group, so leaving it at the default
+   publishes a production release.
+5. **Publish release**, or **Save draft** to look at it first.
+
+`gh release create` has no `--web` flag, so this URL is the route rather than a
+shortcut to it.
 
 Commands. Use the reviewed release draft, not generated notes, and make retries
 idempotent by inspecting first.

@@ -342,14 +342,36 @@ def test_release_notes_name_upgrade_actions_date_and_diff():
         encoding="utf-8"
     )
     changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    release_heading = re.search(
+    # `findall`, not `search`: a second section for the same version would
+    # otherwise be invisible, and the release body would agree with whichever
+    # one came first. Learned from ai-session-search, whose gate stopped at the
+    # first matching heading.
+    headings = re.findall(
         rf"^## \[{re.escape(version)}\] - (\d{{4}}-\d{{2}}-\d{{2}})$",
         changelog,
         re.MULTILINE,
     )
+    assert len(headings) == 1, (
+        f"CHANGELOG.md has {len(headings)} sections for {version}; a release "
+        "must have exactly one, or the notes agree with an arbitrary copy"
+    )
+    # The digit shape alone accepts 2026-02-30. Parsing rejects it, and rejects
+    # a date that has not happened yet, which is what a stale heading looks like
+    # when the bump was prepared days before the tag.
+    from datetime import date
 
-    assert release_heading
-    assert f"Date: {release_heading.group(1)}" in notes
+    try:
+        stamped = date.fromisoformat(headings[0])
+    except ValueError as error:
+        raise AssertionError(
+            f"CHANGELOG.md dates {version} {headings[0]!r}, which is not a real "
+            f"calendar date ({error}); the digit shape alone accepts 2026-02-30"
+        ) from None
+    assert stamped <= date.today(), (
+        f"CHANGELOG.md dates {version} {stamped.isoformat()}, which is in the "
+        "future; set it to the day the release is tagged"
+    )
+    assert f"Date: {headings[0]}" in notes
     assert "## Upgrade notes" in notes
     assert re.search(rf"compare/v\S+\.\.\.v{re.escape(version)}", notes), (
         "the release body must carry a comparison link readers can follow"

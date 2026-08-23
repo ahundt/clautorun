@@ -101,6 +101,12 @@ command that must run outside the lock has to say why, on the line.
 Follow the file lists above and commit locally. Do not push yet.
 
 ### Stage 2: Pre-flight checks
+
+These run on the machine you are sitting at, and prove that platform only. A
+green local run is the precondition for pushing, not evidence the release is
+sound: the Windows and Linux jobs exist because they fail on things macOS never
+sees. Stage 3's exact-SHA CI run is the separate precondition for tagging.
+
 ```bash
 # Capture one candidate commit and require every later check to name it.
 release_sha=$(git rev-parse HEAD)
@@ -344,7 +350,7 @@ if gh release view "$release_tag" >/dev/null 2>&1; then
 else
   gh release create "$release_tag" --verify-tag --prerelease \
     --title "autorun $release_tag" \
-    --notes-file docs/releases/1.0.0rc1.md
+    --notes-file "docs/releases/$release_version.md"
 fi
 test "$(gh release view "$release_tag" --json isPrerelease --jq .isPrerelease)" = true
 test "$(gh release view "$release_tag" --json isDraft --jq .isDraft)" = false

@@ -282,6 +282,53 @@ def test_release_checklist_names_only_files_that_exist():
     )
 
 
+_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+_HEADING_RE = re.compile(r"^#{1,6}\s+(.*?)\s*$", re.MULTILINE)
+_SAME_FILE_LINK_RE = re.compile(r"\[[^\]]+\]\(#([^)]+)\)")
+
+
+def _github_slug(heading: str) -> str:
+    """Reproduce GitHub's heading anchor, including its double-hyphen quirk.
+
+    Punctuation is dropped and each remaining space becomes one hyphen. Runs are
+    *not* collapsed, so "CI \N{EM DASH} **RELEASER**" loses the dash and keeps the
+    two spaces that surrounded it, landing at `...ci--releaser` with two hyphens.
+    A slugger that collapses runs calls those correct anchors broken and buries
+    the one real breakage among them, which is how this check first misread
+    three of RELEASING.md's four stage headings.
+    """
+    return re.sub(r"[^\w\s-]", "", heading.strip().lower()).replace(" ", "-")
+
+
+def test_every_same_file_doc_anchor_resolves_to_a_heading():
+    """A renamed heading silently kills every table-of-contents link into it.
+
+    RELEASING.md's overview table is how a releaser enters the runbook, and its
+    Stage 5 row pointed at `#stage-5-verify-tag-is-on-the-right-commit` after the
+    heading had become "Stage 5: Verify the tag, then approve the tag run". The
+    link still rendered, still looked clickable, and landed on the top of the
+    page, so the reader arrived at Stage 1 believing they were at Stage 5: the
+    one stage whose approval publishes to PyPI permanently.
+
+    Nothing catches this by reading: a dead anchor is indistinguishable from a
+    live one in Markdown source. The structural check is cheap over the whole
+    repository, so it runs there rather than on the release docs alone.
+    """
+    broken: list[str] = []
+    for path in _maintained_docs():
+        text = _FENCE_RE.sub("", path.read_text(encoding="utf-8"))
+        headings = {_github_slug(match) for match in _HEADING_RE.findall(text)}
+        broken.extend(
+            f"{path.relative_to(REPO_ROOT)} -> #{anchor}"
+            for anchor in _SAME_FILE_LINK_RE.findall(text)
+            if anchor not in headings
+        )
+    assert not broken, (
+        "Markdown links point at headings that do not exist, so they silently "
+        "land at the top of the page instead:\n  " + "\n  ".join(sorted(broken))
+    )
+
+
 _UV_PROJECT_RE = re.compile(r"uv run --project (\S+)")
 _CD_RE = re.compile(r"\(cd (\S+) &&")
 

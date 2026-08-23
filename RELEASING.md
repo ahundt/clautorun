@@ -4,10 +4,16 @@ The runbook for cutting a release: bump the version everywhere, prove the
 candidate, publish it. Follow the steps in order; the reference material at the
 end answers "which files" and "what went wrong last time".
 
-## Release in seven steps
+## The release run, stage by stage
 
-Work top to bottom. Every public write is marked **RELEASER**: do not push, tag,
-or publish while preparing a candidate on someone else's behalf.
+Work top to bottom: one-time setup, seven numbered stages, and a TestPyPI
+rehearsal that sits between Stage 3 and Stage 4. Every public write is marked
+**RELEASER**: do not push, tag, approve, or publish while preparing a candidate
+on someone else's behalf.
+
+Steps that have a website route give both it and the equivalent commands. They
+do the same thing; the browser suits a step you want to look at before
+committing to it, the commands suit inspection and repetition.
 
 | Step | What it does |
 |---|---|
@@ -17,7 +23,7 @@ or publish while preparing a candidate on someone else's behalf.
 | [Stage 3](#stage-3-push-the-candidate-and-wait-for-ci--releaser-public-write) | Push the candidate and wait for exact-SHA CI. **RELEASER** |
 | [Rehearsal](#rehearse-on-testpypi-before-any-tag) | `gh workflow run publish.yml` uploads to TestPyPI only, proving OIDC before the tag. |
 | [Stage 4](#stage-4-tag-and-push--releaser-public-write) | Create and push the annotated tag. **RELEASER** |
-| [Stage 5](#stage-5-verify-tag-is-on-the-right-commit) | Confirm the tag points at the commit CI proved. |
+| [Stage 5](#stage-5-verify-the-tag-then-approve-the-tag-run--releaser-public-write) | Confirm the tag names the proven commit, then approve `pypi`. This approval is what publishes to PyPI, and the version becomes permanent. **RELEASER** |
 | [Stage 6](#stage-6-create-github-prerelease--releaser-public-write) | Publish the GitHub prerelease from `docs/releases/<version>.md`. **RELEASER** |
 | [Stage 7](#stage-7-verify-the-published-release-from-the-public-install-path) | Install from the public index and confirm the version answers. |
 
@@ -59,9 +65,11 @@ At <https://test.pypi.org/manage/account/publishing/> and
 | Workflow | `publish.yml` |
 | Environment | `testpypi` on TestPyPI, `pypi` on PyPI |
 
-Create `testpypi` and `pypi` under GitHub Settings -> Environments. Give `pypi`
-a required reviewer so a tag push cannot reach the real index unattended;
-`testpypi` needs no protection. Confirm both environments before rehearsal:
+Create `testpypi` and `pypi` at <https://github.com/ahundt/autorun/settings>,
+**Environments** in the left sidebar, **New environment**, name it,
+**Configure environment**. Give `pypi` a required reviewer so a tag push cannot
+reach the real index unattended; `testpypi` needs no protection. Confirm both
+environments before rehearsal:
 
 ```bash
 names=$(gh api repos/ahundt/autorun/environments --jq \
@@ -219,6 +227,10 @@ summary, hit the global per-test timeout in `pyproject.toml`: pytest-timeout
 kills the whole session, so the remaining tests never run and the first
 reported failure is the only one you get.
 
+Browser: <https://github.com/ahundt/autorun/actions/workflows/ci.yml>, newest
+run. Check its commit against `$release_sha` before reading the result; a run
+for an earlier push looks identical at a glance.
+
 ```bash
 # Find the push run for the exact candidate, then verify its identity.
 run_id=$(gh run list --workflow ci.yml --commit "$release_sha" --event push \
@@ -288,7 +300,7 @@ git tag -a "$release_tag" "$release_sha" -F "docs/releases/$release_version.md"
 git push origin "$release_tag"
 ```
 
-### Stage 5: Verify the tag, then watch and approve the tag run
+### Stage 5: Verify the tag, then approve the tag run — **RELEASER public write**
 
 ```bash
 test "$(git rev-list -n 1 "$release_tag")" = "$release_sha"
@@ -301,7 +313,8 @@ required reviewer. Approving is the irreversible half of the release: PyPI
 versions are immutable, so inspect the run first.
 
 Browser: <https://github.com/ahundt/autorun/actions/workflows/publish.yml>, open
-the tag run, and use "Review deployments" on the `pypi` job.
+the tag run, then **Review deployments** in the banner on the run page itself,
+not on the waiting job. Tick `pypi`, then **Approve and deploy**.
 
 Commands, for inspection and for repeating the same step without the browser.
 The approval call needs a token carrying `repo` and `workflow` scope;
@@ -341,8 +354,15 @@ install takes whatever `main` holds regardless of any release flag. Both halves
 are true at once: a stable user is not pulled onto an RC by the updater, while
 anyone installing from scratch during an RC window gets the RC.
 
-Use the reviewed release draft, not generated notes, and make retries idempotent
-by inspecting first.
+Browser: <https://github.com/ahundt/autorun/releases>, **Draft a new release**,
+pick the pushed tag from **Choose a tag** (never type a new one; the dropdown
+lists what exists, so the tag is confirmed by selecting it), paste
+`docs/releases/<version>.md` into the body, tick **This is a pre-release**, then
+**Publish release**. `gh release create` has no `--web` flag, so this is the
+route rather than a shortcut to it.
+
+Commands. Use the reviewed release draft, not generated notes, and make retries
+idempotent by inspecting first.
 
 ```bash
 if gh release view "$release_tag" >/dev/null 2>&1; then

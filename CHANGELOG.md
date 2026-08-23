@@ -10,48 +10,42 @@ marketplace itself carries a separate `version` field.
 
 ### Fixed
 
-- **Retiring a superseded distribution no longer deletes the `extract-pdfs` and
-  `autorun` commands.** `uv tool uninstall` removes console scripts by *name*,
-  not by owner, and every uv tool shares one bin directory. With `autorun-ai`
-  installed and providing all three scripts, `uv tool uninstall
-  autorun-pdf-extractor` printed "Uninstalled 1 executable: extract-pdfs" and
-  `uv tool uninstall autorun` printed "Uninstalled 3 executables: autorun,
-  autorun-install, extract-pdfs" — leaving the current distribution installed
-  with no working command. The first of those already shipped, so an upgrade
-  silently removed `extract-pdfs` from anyone who still had the retired PDF
-  package. Putting the scripts back is not possible from a `uv tool` install:
-  the repair would reinstall the current distribution, and the only local path
-  is `.../site-packages/autorun`, the import package, which `uv tool install`
-  refuses. The install-time sweep now keeps any uv-installed distribution whose
-  console script is one of autorun's own and names it, with the exact command
-  to reclaim the disk. The pip route still sweeps, because a pip-installed
-  retired package owns its own environment.
+- **Retiring a superseded distribution no longer deletes the `autorun` and
+  `extract-pdfs` commands.** `uv tool uninstall` removes console scripts by name
+  across the one shared uv bin directory, so retiring an old name took the copy
+  the current distribution provides. With `autorun-ai` installed, `uv tool
+  uninstall autorun` reported "Uninstalled 3 executables: autorun,
+  autorun-install, extract-pdfs". The install-time sweep now keeps any
+  uv-installed distribution whose script is one of autorun's own, and prints the
+  command that reclaims its disk. The pip route still sweeps, since a
+  pip-installed package owns its own environment. No published release carried
+  the defect; `autorun-ai` is the first.
 
-- **The TestPyPI rehearsal publishes instead of reporting success and skipping.**
-  `publish.yml` skips its `test` job on a `workflow_dispatch` run and lets
-  `build` through with `always()`. A skipped job propagates down the whole
-  `needs` graph rather than only to its direct dependents, so `publish-testpypi`
-  — which carried no condition of its own — was skipped along with `test` while
-  the run still concluded `success`. The rehearsal exists to exercise trusted
-  publishing before the permanent write to the real index, and it uploaded
-  nothing: a green run proving only that nothing had been attempted. Both
-  publishing jobs now name the result they require instead of inheriting one,
-  and `test_publishing_jobs_state_their_own_precondition` fails on any job that
-  reaches an index behind an inherited gate.
+- **The TestPyPI rehearsal publishes instead of reporting success and
+  skipping.** `publish.yml` skips its `test` job on a `workflow_dispatch` run
+  and lets `build` through with `always()`. A skipped job propagates down the
+  whole `needs` graph rather than only to its direct dependents, so
+  `publish-testpypi` (which carried no condition of its own) was skipped along
+  with `test` while the run still concluded `success`. The rehearsal exists to
+  exercise trusted publishing before the permanent write to the real index, and
+  it uploaded nothing: a green run proving only that nothing had been
+  attempted. Both publishing jobs now name the result they require instead of
+  inheriting one, and `test_publishing_jobs_state_their_own_precondition` fails
+  on any job that reaches an index behind an inherited gate.
 
 - **A config file that names one thing no longer erases the rest.** The user
   config tier overlaid a file's value by assignment, so for the settings that
   hold a dict, naming one key replaced every other key. Two of those dicts make
   that severe. `default_integrations` is the safety-guard table, so a file
   adding a single integration of the user's own silently removed all 48 shipped
-  guards — `rm`, `dd if=`, `fdisk`, `bfg` among them — and nothing reported it;
-  a disarmed autorun is indistinguishable from a working one until something is
+  guards (`rm`, `dd if=`, `fdisk`, `bfg` among them) and nothing reported it; a
+  disarmed autorun is indistinguishable from a working one until something is
   already gone. The two per-harness timeout dicts failed the opposite way: a
-  file naming `gemini` left `CONFIG[key]["claude"]` raising `KeyError` for every
-  harness including `gemini`, and because that failure denies on a tool-gate
-  event, a plausible config file blocked every tool on every harness. Dict
-  settings are now merged onto their declared defaults, so omission means "no
-  opinion" instead of "delete", while naming a key still overrides that key
+  file naming `gemini` left `CONFIG[key]["claude"]` raising `KeyError` for
+  every harness including `gemini`, and because that failure denies on a
+  tool-gate event, a plausible config file blocked every tool on every harness.
+  Dict settings are now merged onto their declared defaults, so omission means
+  "no opinion" instead of "delete", while naming a key still overrides that key
   outright. Per-harness lookups additionally resolve through one helper that
   falls back to a declared value rather than indexing and raising.
 
@@ -59,7 +53,7 @@ marketplace itself carries a separate `version` field.
   removal path runs with "never stop at a failure" so that withdrawing from a
   harness that no longer has the plugin is not an error, and a timeout arrived
   as an ordinary failure. An install on a machine whose `codex` binary answered
-  nothing — not even `codex --version` — therefore spent four consecutive
+  nothing (not even `codex --version`) therefore spent four consecutive
   120-second timeouts on four `codex plugin remove` calls, eight minutes that
   told the user nothing the first failure had not. `Outcome` now distinguishes
   a timeout from a failure, and the commands that were skipped are named rather
@@ -69,8 +63,8 @@ marketplace itself carries a separate `version` field.
 - **A daemon restart no longer makes Pi block every command.** The shared
   JavaScript bridge fell back to spawning `hooks/hook_entry.py` whenever the
   daemon was unreachable, then ran `JSON.parse` over its stdout. An allow
-  writes nothing and exits 0 — silence is how the hook protocol spells "no
-  decision" — so `JSON.parse("")` threw and the catch denied the tool with
+  writes nothing and exits 0 (silence is how the hook protocol spells "no
+  decision") so `JSON.parse("")` threw and the catch denied the tool with
   "[autorun] hook entry returned an invalid response". Every restart, install
   or crash therefore turned into a wall of blocks. Empty stdout is now a
   non-decision; output that is present but unparseable still blocks, and a
@@ -80,13 +74,13 @@ marketplace itself carries a separate `version` field.
   share the bridge.
 
 - **A blocked session is told an exit it can actually take.** When the daemon
-  could not evaluate a permission gate, the deny said to run
-  `autorun --restart-daemon` and retry — a Bash call the same gate was
-  blocking, and a retry for a state that does not clear by waiting. The reason
-  now names `AUTORUN_DISABLE=1`, the one exit that does not require a tool
-  call. `hooks/hook_entry.py` already had this guidance; the client path, which
-  is the one a state-backend failure actually takes, had its own copy that
-  never received it. A test pins the two equal.
+  could not evaluate a permission gate, the deny said to run `autorun
+  --restart-daemon` and retry: a Bash call the same gate was blocking, and a
+  retry for a state that does not clear by waiting. The reason now names
+  `AUTORUN_DISABLE=1`, the one exit that does not require a tool call.
+  `hooks/hook_entry.py` already had this guidance; the client path, which is
+  the one a state-backend failure actually takes, had its own copy that never
+  received it. A test pins the two equal.
 - **A full disk no longer switches every hook off.** `Handler.handleError`
   writes a traceback to `stderr` by default, and Claude Code discards the
   response of any hook that writes to stderr, so an out-of-space log write
@@ -98,7 +92,7 @@ marketplace itself carries a separate `version` field.
 - **A storage failure says what to do about it.** SQLite reports a full disk, a
   missing directory and a permission problem with overlapping wording, so
   "unable to open database file" was not actionable. The message now names the
-  plausible causes and states that recovery is automatic — nothing latches, and
+  plausible causes and states that recovery is automatic. Nothing latches, and
   the restart a reader would otherwise reach for is itself a blocked tool call.
 - **Bug-workaround flags resolve through one grammar.** Four hand-written
   copies existed and two had drifted: one decided applicability with a
@@ -149,12 +143,12 @@ marketplace itself carries a separate `version` field.
 - Settings resolve **CLI parameter > environment variable > config file >
   default**. The file tier is new: an optional `autorun.config.json` under
   `AUTORUN_HOME` is overlaid onto the defaults at import, so it reaches every
-  setting at once rather than wherever a call site remembered to consult it.
-  An absent file — the normal case — changes nothing. An unknown key or a
-  mismatched type is declined rather than accepted, because a typo that
-  silently became a setting would make `autorun --status` report a value
-  nothing reads, and an unreadable file leaves the defaults alone rather than
-  stopping autorun from starting.
+  setting at once rather than wherever a call site remembered to consult it. An
+  absent file (the normal case) changes nothing. An unknown key or a mismatched
+  type is declined rather than accepted, because a typo that silently became a
+  setting would make `autorun --status` report a value nothing reads, and an
+  unreadable file leaves the defaults alone rather than stopping autorun from
+  starting.
 
 ### Changed
 
@@ -169,7 +163,7 @@ marketplace itself carries a separate `version` field.
 - **An interrupted install no longer deletes a file or link it moved aside.**
   Recovery from a killed publication put the staged copy back when the target
   was gone, and parked it under `~/.autorun/installer/backups/` when the target
-  had been recreated — but only for a directory, because the parker copied with
+  had been recreated, but only for a directory, because the parker copied with
   `copytree`. A regular file or a symlink was deleted with the abandoned stage
   instead. Antigravity's `import_manifest.json`, which lists every plugin the
   user has imported, reaches that path through the native-CLI rollback.
@@ -185,7 +179,7 @@ marketplace itself carries a separate `version` field.
 - **`/ar:ok <pattern> <count>` counts concurrent commands correctly.** The
   remaining-use count was read, decremented, and only then written inside the
   state lock, so two commands arriving together both read the same value and
-  both were allowed — one use admitted two commands. The read, the validity
+  both were allowed. One use admitted two commands. The read, the validity
   check, and the decrement now happen in one locked transaction, and a call
   that loses the race falls through to the block rules. The parallel-invocation
   grace window for a single command is unchanged.
@@ -224,12 +218,11 @@ marketplace itself carries a separate `version` field.
   of zero, so `make ci` installed nothing and said nothing. Every target is now
   a thin alias over the `uv` commands CI and the release checklist already use,
   including CI's exact marker selection and its two `ruff` passes.
-- **Every `uv run` in `RELEASING.md` passes `--locked`.**
-  The rule that a candidate is validated against the graph `uv.lock` commits
-  applied to CI alone, so a maintainer's pre-flight — the full suite, the
-  artifact build, the benchmark, the post-install cache check — could resolve a
-  different graph. One test now enforces it on the workflow and the runbook
-  together.
+- **Every `uv run` in `RELEASING.md` passes `--locked`.** The rule that a
+  candidate is validated against the graph `uv.lock` commits applied to CI
+  alone, so a maintainer's pre-flight (the full suite, the artifact build, the
+  benchmark, the post-install cache check) could resolve a different graph. One
+  test now enforces it on the workflow and the runbook together.
 - **Which tests cost money is now a query, not a file name.** Seven test
   modules each re-derived
   `os.environ.get("AUTORUN_ENABLE_TESTS_THAT_COST_REAL_MONEY", "0") == "1"`, so
@@ -260,10 +253,10 @@ marketplace itself carries a separate `version` field.
   `--cli prime` hook fallback, and `~/.prime/agent/AGENTS.md` guidance block.
   One template, one installer step, and one wire protocol serve both
   harnesses; `--prime` selects it alone.
-- **Day units in scope durations.** `/ar:ok`, `/ar:globalok`, `/ar:cache`,
-  and `/ar:task pause` durations accept `d` alongside `h`, `m`, and `s` — for
-  example `2d` or `1d12h` — through the one shared `parse_duration` grammar.
-  A zero count (`/ar:ok rm 0`, `/ar:cache ok 0`) is rejected with an error
+- **Day units in scope durations.** `/ar:ok`, `/ar:globalok`, `/ar:cache`, and
+  `/ar:task pause` durations accept `d` alongside `h`, `m`, and `s` (for
+  example `2d` or `1d12h`) through the one shared `parse_duration` grammar. A
+  zero count (`/ar:ok rm 0`, `/ar:cache ok 0`) is rejected with an error
   instead of granting an allow that could never activate.
 - **OpenCode todo state enters the task lifecycle.** The OpenCode plugin
   forwards `todo.updated` events as `todowrite` receipts, so OpenCode's native
@@ -277,11 +270,11 @@ marketplace itself carries a separate `version` field.
   the Pi-family extension asks the daemon for the session's next id
   (`task_next_id_v1`, one above every numeric id recorded, never reused), so
   ids read `1`, `2`, `3` in tool results, `TaskList`, and
-  `TaskUpdate(taskId=…)` — the same shape Claude Code's task tools use —
-  instead of a 35-character `pi-<uuid>` string per call. When no daemon
-  answers, the extension falls back to a `<cli>-<random>` id that the receipt
-  then confirms or flags. `TaskList` and `/ar:task` list tasks in creation
-  order rather than id-string order, so `10` no longer sorts before `9`.
+  `TaskUpdate(taskId=…)` (the same shape Claude Code's task tools use) instead
+  of a 35-character `pi-<uuid>` string per call. When no daemon answers, the
+  extension falls back to a `<cli>-<random>` id that the receipt then confirms
+  or flags. `TaskList` and `/ar:task` list tasks in creation order rather than
+  id-string order, so `10` no longer sorts before `9`.
 - **Semantic XML regions in every shipped skill.** All 17 plugin skills, the
   Codex `$ar` catalog skill, the pdf-extractor skill, and the repo-internal
   maintainer skill wrap each major section in balanced, descriptive tags
@@ -298,31 +291,31 @@ marketplace itself carries a separate `version` field.
 ### Fixed
 
 - **A counted allow is no longer spent twice by one command.** autorun runs
-  twice for a single Bash command — its own hook, and the `rtk hook claude`
-  entry that spawns another autorun — which is why grants carry the
+  twice for a single Bash command (its own hook, and the `rtk hook claude`
+  entry that spawns another autorun) which is why grants carry the
   `session:tool:command` fingerprint of the call that consumed them. That
   fingerprint was recorded only on the use that reached zero, so at any higher
-  count both invocations took the ordinary path and each decremented:
-  `/ar:ok rm 3` bought one command, then a second, then blocked, and
-  `/ar:ok rm 2` bought one. Every counted call is stamped now, and a repeat of
-  the stamped call inside the grace window refreshes the stamp without
-  decrementing — the rule `ScopedGrant.claim_once` already applied. A different
-  command arriving in the same window still costs its own use. `/ar:cache ok N`
-  grants are counted through the same code and were affected identically.
+  count both invocations took the ordinary path and each decremented: `/ar:ok
+  rm 3` bought one command, then a second, then blocked, and `/ar:ok rm 2`
+  bought one. Every counted call is stamped now, and a repeat of the stamped
+  call inside the grace window refreshes the stamp without decrementing; the
+  rule `ScopedGrant.claim_once` already applied. A different command arriving
+  in the same window still costs its own use. `/ar:cache ok N` grants are
+  counted through the same code and were affected identically.
 - **Five wrapper spellings no longer hide the command they wrap.** The
   transparent-wrapper grammar recorded the wrong arity for several options, and
-  every mistake pointed the same way — the child command vanished and the guard
+  every mistake pointed the same way: the child command vanished and the guard
   allowed it. `sudo -k <command>` was treated as the credential-only form and
   discarded, though sudo documents that with a command it runs the command;
   `sudo -D <dir>` and `sudo -R <dir>` did not consume their directory, so the
   directory was read as the command; `chroot --skip-chdir` (which takes no
   value) swallowed NEWROOT; `env --block-signal`, `--default-signal` and
-  `--ignore-signal` are documented with a bracketed value, so consuming the next
-  word ate the command; and `env -a <name>` did not consume its value. Each
-  option's arity now matches the tool that owns it.
+  `--ignore-signal` are documented with a bracketed value, so consuming the
+  next word ate the command; and `env -a <name>` did not consume its value.
+  Each option's arity now matches the tool that owns it.
 - **The remaining predicates ask about the session's directory too.**
-  `_has_uncommitted_changes` — registered under two names for user integration
-  files — kept its pre-v4 body after its sibling became an alias: `git diff
+  `_has_uncommitted_changes` (registered under two names for user integration
+  files) kept its pre-v4 body after its sibling became an alias: `git diff
   --quiet` with no directory, no scrubbed environment, and every error read as
   "no changes". It reported on whatever directory the daemon was started in,
   and a staged-only edit did not count as uncommitted work. It delegates to
@@ -331,21 +324,21 @@ marketplace itself carries a separate `version` field.
   shared directory; it runs in the session's.
 - **`git stash drop` is judged against the session's repository.** The guard
   that asks whether a stash exists ran `git stash list` in the hook process's
-  own working directory — and the daemon serves every session on this machine
+  own working directory, and the daemon serves every session on this machine
   from one process, started wherever it was started. So it answered for a
   repository the user was not in, both ways: a drop went through in a session
   whose stash was full because that other directory had none, and was blocked
   in a session with nothing to lose because it did. The first of those destroys
   work with no way back. It reads `ctx.cwd` now, with the same scrubbed
   environment and work-tree probe `_file_differs_from_ref` uses, and a probe
-  that cannot answer blocks rather than permits — the rule the Time Machine
+  that cannot answer blocks rather than permits; the rule the Time Machine
   predicate beside it already followed.
 - **A Windows executable suffix no longer bypasses every command block.**
   `rm.exe -rf …`, `git.exe push` and `git.cmd checkout` matched no pattern,
   because the command name was read from argv[0] literally. That is the real
   filename on a platform this project tests in CI, so any block could be walked
   past by spelling it out. The one basename helper now takes off `.exe`,
-  `.com`, `.bat` and `.cmd`, and splits on both path separators —
+  `.com`, `.bat` and `.cmd`, and splits on both path separators.
   `os.path.basename` splits backslashes only when it is itself running on
   Windows, and the hook parses the same command strings everywhere. The
   destructive-git and read-command predicates share that helper now instead of
@@ -358,11 +351,11 @@ marketplace itself carries a separate `version` field.
   Time Machine predicate beside it already did, which also recurses into shell
   bodies.
 - **A destructive checkout or restore is caught wherever it sits in the line.**
-  Both predicates read one segment — the first whose git subcommand is
-  `checkout` or `restore` — and let it answer for the whole command. So
-  `git checkout -- clean.py && git checkout -- dirty.py` was judged entirely by
-  the file that had nothing to lose, and the write that discarded `dirty.py`
-  ran unchallenged. The same shape hid behind a leading `git checkout -b` and a
+  Both predicates read one segment (the first whose git subcommand is
+  `checkout` or `restore`) and let it answer for the whole command. So `git
+  checkout -- clean.py && git checkout -- dirty.py` was judged entirely by the
+  file that had nothing to lose, and the write that discarded `dirty.py` ran
+  unchallenged. The same shape hid behind a leading `git checkout -b` and a
   leading `git restore --staged`. Separately, `git restore` decided
   staged-versus-worktree by scanning the whole command string for the flag, so
   a `--staged` in an unrelated `echo` disarmed it. Every checkout and restore
@@ -376,12 +369,13 @@ marketplace itself carries a separate `version` field.
   layer.
 - **Creating a branch is no longer blocked as a destructive checkout.** The
   `git reset --hard` block recommends `git checkout -b backup/<stamp>-wip` to
-  save the work first, and a dirty repository is exactly the state that produces
-  that block — so the recommended recovery was blocked too, with a message about
-  discarding changes. `git checkout -b` and `--orphan` create a branch at the
-  current commit and cannot overwrite working-tree content; git aborts rather
-  than write over a local change. Both are allowed now. `-B`, which moves an
-  existing branch ref, and `-f`, which really does overwrite, are unchanged.
+  save the work first, and a dirty repository is exactly the state that
+  produces that block, so the recommended recovery was blocked too, with a
+  message about discarding changes. `git checkout -b` and `--orphan` create a
+  branch at the current commit and cannot overwrite working-tree content; git
+  aborts rather than write over a local change. Both are allowed now. `-B`,
+  which moves an existing branch ref, and `-f`, which really does overwrite,
+  are unchanged.
 - **A user-authored shared skill no longer produces a duplicate listing.**
   When `~/.agents/skills/<name>` holds the user's own loadable skill, the
   installer previously published autorun's same-named skill natively (for
@@ -392,11 +386,11 @@ marketplace itself carries a separate `version` field.
   previously published duplicates.
 - **A harness-targeted install no longer retires the shared skills other
   harnesses read.** `autorun --install --claude` (or an empty selection)
-  claimed nothing under `~/.agents/skills` because Claude loads its skills
-  from the plugin package, so the retirement sweep removed every autorun-owned
-  tree there as "no longer shipped" — the copies Codex, Qwen, Pi, Prime,
-  ForgeCode, and OpenCode load. Every shipped skill is now claimed at the
-  shared root on every install, and an empty selection sweeps nothing.
+  claimed nothing under `~/.agents/skills` because Claude loads its skills from
+  the plugin package, so the retirement sweep removed every autorun-owned tree
+  there as "no longer shipped": the copies Codex, Qwen, Pi, Prime, ForgeCode,
+  and OpenCode load. Every shipped skill is now claimed at the shared root on
+  every install, and an empty selection sweeps nothing.
 - **A tree installed before file hashes were recorded is no longer stuck.**
   Such a tree (owned marker, `files: []`) that had drifted from the source was
   reported as "you edited files we installed" naming every file, and no
@@ -446,15 +440,15 @@ marketplace itself carries a separate `version` field.
   the first contended store-lock attempt fails open by design and slow
   Windows runners saw two claim winners.
 - **PyPI publishing through one distribution.** `autorun-ai` is the only
-  published package — PyPI prohibits the bare name `autorun`, so the packaging
+  published package: PyPI prohibits the bare name `autorun`, so the packaging
   name carries the `-ai` suffix while the command, the import package, the
   marketplace plugin and the `/ar:` prefix are all unchanged. PDF extraction
-  ships inside it: `pdf_extraction` and the
-  `extract-pdfs` script are always present, and every extraction backend is an
-  optional extra, so `autorun-ai[pdf]` is the ordinary PDF install and nobody else
-  downloads an extraction library. `pdf-extractor` remains a separate plugin in
-  every harness — its own manifest, command, and skill — it is simply not a
-  separate Python package. The remaining extras are `pdf-gpu`, `pdf-llm`,
+  ships inside it: `pdf_extraction` and the `extract-pdfs` script are always
+  present, and every extraction backend is an optional extra, so
+  `autorun-ai[pdf]` is the ordinary PDF install and nobody else downloads an
+  extraction library. `pdf-extractor` remains a separate plugin in every
+  harness (its own manifest, command, and skill) it is simply not a separate
+  Python package. The remaining extras are `pdf-gpu`, `pdf-llm`,
   `pdf-progress`, and `pdf-all`. The `pdf` extra uses maintained `pypdf` under
   the compatible `pypdf2` backend id. marker-pdf is omitted because it pins
   Pillow below the patched release; docling is constrained off macOS while its
@@ -466,7 +460,7 @@ marketplace itself carries a separate `version` field.
   packaged bounded JSON client while retaining their native event and response
   shapes.
 - **Agent memory install.** `autorun --install` writes a sentinel-delimited
-  guidance block into each harness's memory file — `~/.claude/CLAUDE.md`,
+  guidance block into each harness's memory file: `~/.claude/CLAUDE.md`,
   `~/.codex/AGENTS.md`, `<forge>/AGENTS.md`. Content is per-harness: the Claude
   block covers two measured failure modes (context-capacity claims made without
   measurement, and stop-gate denials) that would be false statements on Codex.
@@ -479,12 +473,13 @@ marketplace itself carries a separate `version` field.
   a skills directory. Refuses outright when the target skills directory is
   itself a symlink, because Claude Code stops loading user skills in that layout
   ([anthropics/claude-code#38051](https://github.com/anthropics/claude-code/issues/38051)).
-- **Health checks in `--status`.** Six probes for install states that previously
-  produced no signal at all: guidance written where the harness will not read it
-  (`~/.codex/AGENTS.override.md` shadowing), broken skill links, a skill reaching
-  one harness by two paths, an orphaned sentinel slug, a stray top-level key that
-  makes Codex drop every hook in the file, and artifacts left by an interrupted
-  uninstall. Advisory only — it reports, it never repairs.
+- **Health checks in `--status`.** Six probes for install states that
+  previously produced no signal at all: guidance written where the harness will
+  not read it (`~/.codex/AGENTS.override.md` shadowing), broken skill links, a
+  skill reaching one harness by two paths, an orphaned sentinel slug, a stray
+  top-level key that makes Codex drop every hook in the file, and artifacts
+  left by an interrupted uninstall. Advisory only: it reports, it never
+  repairs.
 - **Configurable install locations.** `shared_agents_dir`,
   `shared_agents_skills_subdir`, `shared_agents_plugins_subdir` and
   `codex_plugin_source_dir` in CONFIG. Install and uninstall read the same keys,
@@ -548,7 +543,7 @@ marketplace itself carries a separate `version` field.
   4.0s wrapper, and opencode 0.8 + 4.0 against 4.5. The wrapper fires first, so
   the client's own bound is unreachable and the failure response explaining the
   timeout is never written. The room for a cold start is the wrapper minus the
-  response — 0.5s on gemini, 1.0s on Claude — so no single constant can serve
+  response (0.5s on gemini, 1.0s on Claude) so no single constant can serve
   every harness. `client_total_budget()` derives one deadline per harness and
   the client spends it across both phases, which makes the sum correct by
   construction. The retry cap becomes a recursion guard rather than the bound;
@@ -561,7 +556,7 @@ marketplace itself carries a separate `version` field.
   `GetConsoleMode` refusing it is authoritative; failing to obtain a handle at
   all is missing evidence and now leaves the `isatty()` answer standing. The
   probe moved to `windows_tty_is_a_console()` so it can be exercised off
-  Windows — inside `can_prompt` it sits behind a `sys.platform` guard, so every
+  Windows. Inside `can_prompt` it sits behind a `sys.platform` guard, so every
   test of it passed vacuously everywhere except the one platform that ran it.
 - **The CLI launcher crashed instead of printing repair instructions.**
   `autorun.py` prints its guidance when the package may not be importable, so
@@ -589,7 +584,7 @@ marketplace itself carries a separate `version` field.
   directory in generated Python without escaping, so `C:\Users\...` made `\U`
   an invalid escape and the interpreter died before importing anything. Every
   hook then fell through to the CLI, which waited on the daemon it had just
-  failed to start until the caller gave up — reported as `autorun CLI timed out
+  failed to start until the caller gave up, reported as `autorun CLI timed out
   after 5s`. The daemon was also spawned with `start_new_session` alone, which
   is POSIX-only, so even when it did start it was reaped with its parent.
 - **The daemon fast path did not exist on Windows.** `try_daemon` returned
@@ -632,7 +627,7 @@ marketplace itself carries a separate `version` field.
   uninstall.
 - **ForgeCode install destroyed user-authored `<base>/AGENTS.md`.** It used
   `shutil.copy2`; it now merges a sentinel block like every other harness.
-  Idempotence tests could not catch this — overwriting with the same template
+  Idempotence tests could not catch this: overwriting with the same template
   yields identical bytes under the same source and toolchain.
 - **A stray sentinel marker made memory installs grow the guidance file
   without bound** while leaving the block permanently un-strippable.
@@ -693,20 +688,19 @@ marketplace itself carries a separate `version` field.
 - **A canary fails the suite when a test modifies autorun's installed copy.**
   `AUTORUN_HOME` and `AUTORUN_TEST_STATE_DIR` redirect state, but nothing
   redirected the installed plugin, the harness settings pointing at it, or the
-  shared marketplace registry — so a test that shelled out to an installer, or
+  shared marketplace registry, so a test that shelled out to an installer, or
   resolved a path from the real home instead of its fixture, edited the user's
   working install and the suite still passed. `tests/conftest.py` now
-  fingerprints those artifacts at session start and reports any create, edit, or
-  delete at session finish, with a non-zero exit. Only code and configuration
-  are watched; sockets, PID files, logs and databases under `~/.autorun` are
-  excluded because a user's own daemon writes them while the suite runs, and a
-  canary with false positives gets deleted. `e2e` and `release` selections
-  install on purpose and are exempt, as is
-  `AUTORUN_ALLOW_LIVE_INSTALL_WRITES=1`.
-  `tests/test_live_install_canary.py` exercises every branch against a fake
-  home, including an end-to-end pytest run whose test writes to the install and
-  must exit non-zero — a canary nobody has seen fail reads as coverage while
-  providing none.
+  fingerprints those artifacts at session start and reports any create, edit,
+  or delete at session finish, with a non-zero exit. Only code and
+  configuration are watched; sockets, PID files, logs and databases under
+  `~/.autorun` are excluded because a user's own daemon writes them while the
+  suite runs, and a canary with false positives gets deleted. `e2e` and
+  `release` selections install on purpose and are exempt, as is
+  `AUTORUN_ALLOW_LIVE_INSTALL_WRITES=1`. `tests/test_live_install_canary.py`
+  exercises every branch against a fake home, including an end-to-end pytest
+  run whose test writes to the install and must exit non-zero; a canary nobody
+  has seen fail reads as coverage while providing none.
 - `_expand_home` gives `~` expansion a single seam; install and uninstall
   previously resolved through `Path.home()` and `Path.expanduser()`
   respectively, which differ under test.

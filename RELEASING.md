@@ -1,6 +1,347 @@
-# Version Update Checklist
+# Releasing autorun
 
-When updating versions in the autorun marketplace, use this checklist to ensure all locations are updated consistently.
+The runbook for cutting a release: bump the version everywhere, prove the
+candidate, publish it. Follow the steps in order; the reference material at the
+end answers "which files" and "what went wrong last time".
+
+## Release in seven steps
+
+Work top to bottom. Every public write is marked **RELEASER**: do not push, tag,
+or publish while preparing a candidate on someone else's behalf.
+
+| Step | What it does |
+|---|---|
+| [Before you start](#before-you-start) | Register the PyPI and TestPyPI pending publishers and the two GitHub environments. Once per project. **RELEASER** |
+| [Stage 1](#stage-1-version-bump) | Bump the version everywhere the [version sites](#current-inventory) table lists, and commit locally. |
+| [Stage 2](#stage-2-pre-flight-checks) | Run every gate against one candidate SHA. Nothing public happens yet. |
+| [Stage 3](#stage-3-push-the-candidate-and-wait-for-ci--releaser-public-write) | Push the candidate and wait for exact-SHA CI. **RELEASER** |
+| [Rehearsal](#rehearse-on-testpypi-before-any-tag) | `gh workflow run publish.yml` uploads to TestPyPI only, proving OIDC before the tag. |
+| [Stage 4](#stage-4-tag-and-push--releaser-public-write) | Create and push the annotated tag. **RELEASER** |
+| [Stage 5](#stage-5-verify-tag-is-on-the-right-commit) | Confirm the tag points at the commit CI proved. |
+| [Stage 6](#stage-6-create-github-prerelease--releaser-public-write) | Publish the GitHub prerelease from `docs/releases/<version>.md`. **RELEASER** |
+| [Stage 7](#stage-7-verify-the-published-release-from-the-public-install-path) | Install from the public index and confirm the version answers. |
+
+If a step fails after a public write, go to the [recovery table](#recovery-table)
+before retrying: a partly-successful step may already have published something.
+
+Everything below the [reference](#reference) divider is lookup material, not steps.
+
+## Before you start
+
+`.github/workflows/publish.yml` uploads one distribution with Trusted
+Publishing (OIDC). No API token is stored anywhere.
+
+| Distribution | Source directory | Installs as |
+|--------------|------------------|-------------|
+| `autorun-ai` | `plugins/autorun` | `uv tool install autorun-ai`, or `'autorun-ai[pdf]'` for PDF extraction |
+
+There is no second package. `plugins/pdf-extractor` is a plugin in every
+harness (its own manifest, command, and skill) while its code ships inside
+this wheel as `pdf_extraction` behind the `pdf` extra.
+`test_documentation_consistency.py::test_the_pdf_plugin_ships_inside_autorun_and_not_beside_it`
+holds that in place, and the publish workflow fails the build if the wheel stops
+carrying `pdf_extraction`, `extract-pdfs`, or the pdf extras.
+
+### One-time setup — **RELEASER, account access required**
+
+Two registrations are required: one project on each of two indexes. Until the
+first upload, register the project as a pending publisher
+([PyPI documentation](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)).
+
+At <https://test.pypi.org/manage/account/publishing/> and
+<https://pypi.org/manage/account/publishing/>, add a pending publisher for
+`autorun-ai` with:
+
+| Field | Value |
+|-------|-------|
+| Owner | `ahundt` |
+| Repository | `autorun` |
+| Workflow | `publish.yml` |
+| Environment | `testpypi` on TestPyPI, `pypi` on PyPI |
+
+Create `testpypi` and `pypi` under GitHub Settings -> Environments. Give `pypi`
+a required reviewer so a tag push cannot reach the real index unattended;
+`testpypi` needs no protection. Confirm both environments before rehearsal:
+
+```bash
+names=$(gh api repos/ahundt/autorun/environments --jq \
+  '[.environments[].name] | sort | join(" ")')
+test "$names" = "pypi testpypi"
+```
+
+The GitHub API cannot confirm pending-publisher records on PyPI. The releaser
+must verify both records in the two account pages before continuing.
+
+## Release Workflow
+
+Every public write below is marked **RELEASER**. Do not push, tag, or create a
+GitHub release while preparing a candidate on someone else's behalf.
+
+Every command in this checklist passes `--locked`. It is the same rule
+`.github/workflows/ci.yml` follows and
+`test_documentation_consistency.py::test_every_release_gate_environment_is_the_locked_one`
+enforces on both files: a candidate is validated against the graph `uv.lock`
+commits, never against a fresh resolution that the release will not ship. A
+command that must run outside the lock has to say why, on the line.
+
+### Stage 1: Version bump
+Follow the file lists above and commit locally. Do not push yet.
+
+### Stage 2: Pre-flight checks
+```bash
+# Capture one candidate commit and require every later check to name it.
+release_sha=$(git rev-parse HEAD)
+git fetch origin main --tags
+test -z "$(git status --porcelain=v1)"
+
+# Run from the plugin directories, matching CI discovery/configuration.
+(cd plugins/autorun && uv run --project . --locked pytest tests/ -m "not tmux and not e2e and not release" -v)
+# The PDF tests stay with their plugin, but the code they import ships in the
+# autorun-ai distribution and `plugins/pdf-extractor` deliberately has no
+# pyproject.toml — so the environment must come from the autorun project, with
+# `--extra pdf` for the backends. Running it as its own project resolves the
+# workspace root instead and collects four `ModuleNotFoundError: pdf_extraction`.
+uv run --project plugins/autorun --locked --extra pdf pytest plugins/pdf-extractor/tests/ -v
+(cd plugins/autorun && uv run --project . --locked pytest tests/test_release_artifacts.py -m release -v)
+(cd plugins/autorun && AUTORUN_ENABLE_STATE_BENCHMARK=1 uv run --project . --locked pytest tests/test_state_store_benchmark.py -m benchmark -v)
+
+# CONFIG must still load after a version bump. No test above imports it at the
+# top level, so a broken table reaches the release as an import error.
+uv run --project plugins/autorun --locked python -c "from autorun.config import DEFAULT_INTEGRATIONS; print(len(DEFAULT_INTEGRATIONS))"
+# ─────────────────────────────────────────────────────────────────────────────
+# LIVE INSTALL BOUNDARY. Everything above this line runs against the checkout
+# and a scratch home. The next command is the one exception in this checklist:
+# it publishes the candidate to every harness detected on THIS machine and
+# restarts nothing, so every session already attached keeps its old hook until
+# it restarts. Run it only as the releasing maintainer, on your own machine,
+# when you intend that. An agent must not run it without your written
+# instruction in the current conversation naming this command — see the
+# isolation rule in AGENTS.md §1, which governs every other install here.
+#
+# It exists because the harness loads the plugin *cache*, not the source, so a
+# fix to hooks/hook_entry.py or hooks/hooks.json that never reaches the cache is
+# invisible: the live hook keeps running the previous file with nothing to say
+# so. The opt-in check below is what reads the cache, and it is meaningless
+# without this. To rehearse instead of committing, run the same command with
+# HOME, USERPROFILE, PI_CODING_AGENT_DIR, AUTORUN_HOME and
+# AUTORUN_TEST_STATE_DIR redirected to a scratch tree, as the marketplace
+# rehearsal below in this stage does, and skip the cache check.
+uv run --project plugins/autorun --locked python -m autorun --install --force
+# ─────────────────────────────────────────────────────────────────────────────
+# Hook configuration is read once at session start, so a hook change takes
+# effect in the NEXT session, not this one.
+
+# Opt-in, and only meaningful after that reinstall: confirms the Claude plugin
+# cache and the installed Gemini extension actually carry the hook files in
+# this tree. Skipped by default so an ordinary source edit does not fail the
+# suite before the reinstall.
+(cd plugins/autorun && AUTORUN_ENABLE_LIVE_INSTALL_CHECKS=1 uv run --project . --locked pytest tests/test_hook_entry.py -k "cache_matches_source or gemini_extension_hooks_match" -v)
+
+# No existing tag for this version
+git tag -l 'vX.Y.Z'                    # expect empty
+git ls-remote --tags origin vX.Y.Z     # expect empty
+```
+
+Rehearse the marketplace install from the exact candidate checkout, never the
+live home. This validates what a fresh Claude install will copy without waiting
+for the tag. Keep the scratch directory until its files have been inspected.
+
+```bash
+scratch_root=$(mktemp -d "${TMPDIR:-/tmp}/autorun-rc1.XXXXXX")
+mkdir -p "$scratch_root/home"
+git worktree add --detach "$scratch_root/checkout" "$release_sha"
+env HOME="$scratch_root/home" USERPROFILE="$scratch_root/home" \
+  CLAUDE_CONFIG_DIR="$scratch_root/home/.claude" \
+  AUTORUN_HOME="$scratch_root/autorun-home" \
+  AUTORUN_TEST_STATE_DIR="$scratch_root/state" \
+  claude plugin marketplace add "$scratch_root/checkout" --scope user
+env HOME="$scratch_root/home" USERPROFILE="$scratch_root/home" \
+  CLAUDE_CONFIG_DIR="$scratch_root/home/.claude" \
+  AUTORUN_HOME="$scratch_root/autorun-home" \
+  AUTORUN_TEST_STATE_DIR="$scratch_root/state" \
+  claude plugin install ar@autorun --scope user
+env HOME="$scratch_root/home" USERPROFILE="$scratch_root/home" \
+  CLAUDE_CONFIG_DIR="$scratch_root/home/.claude" \
+  claude plugin list
+find "$scratch_root" -type f -print | sort
+```
+
+The inventory must contain the registered `ar@autorun` plugin and must not
+contain `.coverage`, `coverage.xml`, `htmlcov`, `.ruff_cache`, or a development
+`.venv` copied from the checkout. Claude may create and own a managed `.venv`
+later; the installer must preserve that runtime. Do not point this rehearsal at
+`~/.claude`, `~/.codex`, or a running daemon's state directory. After inspecting
+the result, detach it with `git worktree remove "$scratch_root/checkout"` before
+discarding the scratch directory.
+
+### Stage 3: Push the candidate and wait for CI — **RELEASER public write**
+
+```bash
+git push origin "$release_sha":main
+git fetch origin main
+test "$(git rev-parse origin/main)" = "$release_sha"
+```
+
+The GitHub-backed Claude marketplace follows the repository's default branch,
+not a release asset. Requiring `origin/main`, the CI run, and the later tag to
+name the same SHA keeps a fresh marketplace install identical to the RC.
+
+All eleven jobs must be green, not just the matrix. The seven-entry matrix
+covers Python 3.10-3.14 on Ubuntu plus macOS 3.13 and Windows 3.13; four more
+run once each: `coverage` (75% floor), `release-artifacts` (`-m release`),
+`tmux-integration` (`-m tmux`), and `state-benchmark` (`-m benchmark`). Those
+four are the only place their markers run, since the matrix deselects them.
+
+Two failure shapes are worth recognising before reading logs. A job that dies
+in "Install dependencies" with "Unable to find lockfile at `uv.lock`" means the
+lockfile is missing from the checkout, not that a dependency broke. A job whose
+JUnit XML never appears, with a `+++ Timeout +++` stack dump instead of a test
+summary, hit the global per-test timeout in `pyproject.toml`: pytest-timeout
+kills the whole session, so the remaining tests never run and the first
+reported failure is the only one you get.
+
+```bash
+# Find the push run for the exact candidate, then verify its identity.
+run_id=$(gh run list --workflow ci.yml --commit "$release_sha" --event push \
+  --limit 1 --json databaseId --jq '.[0].databaseId')
+test -n "$run_id"
+test "$(gh run view "$run_id" --json headSha --jq .headSha)" = "$release_sha"
+
+# Wait for completion and require all eleven expanded jobs to succeed.
+gh run watch "$run_id" --exit-status
+test "$(gh run view "$run_id" --json jobs --jq '.jobs | length')" = 11
+test "$(gh run view "$run_id" --json jobs --jq \
+  '[.jobs[] | select(.conclusion != "success")] | length')" = 0
+
+# If it fails, check logs
+gh run view "$run_id" --log-failed
+```
+
+The workflow file is part of the release trust boundary. Every external
+`uses:` reference must remain pinned to a full 40-character commit SHA; the
+trailing version comment is for humans.
+
+### Rehearse on TestPyPI before any tag
+
+Run this only after Stage 3 has pushed `publish.yml` and exact-SHA CI is green.
+`workflow_dispatch` builds and publishes to TestPyPI only; its
+`testpypi_only` input defaults to true, so the rehearsal cannot reach PyPI:
+
+```bash
+gh workflow run publish.yml --ref main
+```
+
+Require the workflow to succeed, then install it both ways in throwaway tool
+directories so the rehearsal cannot disturb the installed CLIs. Install the
+plain form too: it is the one that proves no extraction library is required.
+
+```bash
+UV_TOOL_DIR=$(mktemp -d) UV_TOOL_BIN_DIR=$(mktemp -d) \
+  uv tool install --index-url https://test.pypi.org/simple/ \
+  --extra-index-url https://pypi.org/simple/ autorun-ai
+UV_TOOL_DIR=$(mktemp -d) UV_TOOL_BIN_DIR=$(mktemp -d) \
+  uv tool install --index-url https://test.pypi.org/simple/ \
+  --extra-index-url https://pypi.org/simple/ 'autorun-ai[pdf]'
+```
+
+TestPyPI refuses a re-upload of an existing file. The workflow passes
+`skip-existing: true` there so an identical rerun succeeds; PyPI remains strict.
+A changed artifact needs a new version and a complete restart from Stage 1.
+
+### Stage 4: Tag and push — **RELEASER public write**
+
+Derive the tag from the declared version instead of typing it. `v1.0.0-rc1` for
+`1.0.0rc1` is a plausible slip, and a wrong tag on a public repository is one of
+the writes the recovery table below says to stop on rather than correct in
+place. `test_every_release_identity_field_declares_the_same_version` separately
+guarantees that every manifest agrees with the field read here, so one substitution
+covers them all.
+
+```bash
+test "$(git rev-parse HEAD)" = "$release_sha"
+release_version=$(rg -N -o -r '$1' '^version = "(.+)"' plugins/autorun/pyproject.toml)
+test -n "$release_version"
+release_tag="v$release_version"
+
+git tag -a "$release_tag" "$release_sha" -m "autorun $release_tag"
+git push origin "$release_tag"
+```
+
+### Stage 5: Verify tag is on the right commit
+```bash
+test "$(git rev-list -n 1 "$release_tag")" = "$release_sha"
+test "$(git ls-remote origin "refs/tags/$release_tag^{}" | cut -f1)" = "$release_sha"
+```
+
+### Stage 6: Create GitHub prerelease — **RELEASER public write**
+
+The `--prerelease` flag is part of updater correctness. It governs **self-update
+only**: `installer/entrypoint.py` sets `allow_prerelease` from whether the
+*installed* version contains a letter, then filters candidates on the release's
+`prerelease` field, so an RC published without the flag is offered to stable
+installs as an ordinary upgrade.
+
+It does not govern fresh installs, and that is expected rather than a marking
+failure. `claude plugin marketplace add` follows the default branch, so a fresh
+install takes whatever `main` holds regardless of any release flag. Both halves
+are true at once: a stable user is not pulled onto an RC by the updater, while
+anyone installing from scratch during an RC window gets the RC.
+
+Use the reviewed release draft, not generated notes, and make retries idempotent
+by inspecting first.
+
+```bash
+if gh release view "$release_tag" >/dev/null 2>&1; then
+  gh release view "$release_tag" --json tagName,isDraft,isPrerelease,url
+else
+  gh release create "$release_tag" --verify-tag --prerelease \
+    --title "autorun $release_tag" \
+    --notes-file docs/releases/1.0.0rc1.md
+fi
+test "$(gh release view "$release_tag" --json isPrerelease --jq .isPrerelease)" = true
+test "$(gh release view "$release_tag" --json isDraft --jq .isDraft)" = false
+```
+
+### Stage 7: Verify the published release from the public install path
+
+Stage 2's rehearsal installs from a local worktree, which is the right pre-tag
+check but is not the command the release notes give users. Run that command
+against the published state, in a scratch `HOME`, never `~/.claude`:
+
+```bash
+verify_root=$(mktemp -d "${TMPDIR:-/tmp}/autorun-verify.XXXXXX")
+mkdir -p "$verify_root/home"
+env HOME="$verify_root/home" USERPROFILE="$verify_root/home" \
+  CLAUDE_CONFIG_DIR="$verify_root/home/.claude" \
+  AUTORUN_HOME="$verify_root/autorun-home" \
+  AUTORUN_TEST_STATE_DIR="$verify_root/state" \
+  claude plugin marketplace add https://github.com/ahundt/autorun.git --scope user
+env HOME="$verify_root/home" USERPROFILE="$verify_root/home" \
+  CLAUDE_CONFIG_DIR="$verify_root/home/.claude" \
+  AUTORUN_HOME="$verify_root/autorun-home" \
+  AUTORUN_TEST_STATE_DIR="$verify_root/state" \
+  claude plugin install ar@autorun --scope user
+```
+
+The installed plugin's version must equal `$release_version`, and the plugin
+must register as `ar` in marketplace `autorun`. Remove the scratch directory once
+its contents have been inspected.
+
+### Recovery table
+
+| State | Recovery |
+|---|---|
+| Before the tag is pushed | Delete/recreate the local tag after the fix and repeat every exact-SHA gate. |
+| Remote tag exists, GitHub release absent | Stop. Do not move or delete the remote tag; fix on `main` and issue the next RC version. |
+| GitHub prerelease exists and is correct | Treat a retry as success; verify its tag, commit, draft flag, and prerelease flag. |
+| GitHub prerelease exists but content or artifacts are wrong | Do not replace immutable code under the tag. Correct prose in place only when code is unchanged; otherwise issue the next RC version. |
+| Any public step partially succeeds | Inventory remote tag and release state before retrying. Never assume a failed command made no public write. |
+
+---
+
+# Reference
+
+Lookup material. Nothing below here is a step in the release run.
 
 ## Unified Versioning
 
@@ -187,324 +528,7 @@ all = [
 ]
 ```
 
-These are minimum versions — only bump for breaking changes, not patch releases. See Gotcha #3.
-
-## Verification Steps
-
-After updating versions:
-
-1. **Search for old version**: use the `rg --hidden` command in "Quick Method"
-2. **Run core tests**: `uv run --project plugins/autorun --locked pytest plugins/autorun/tests/test_unit_simple.py -v`
-3. **Run version-sensitive tests**: `uv run --project plugins/autorun --locked pytest plugins/autorun/tests/test_install_memory_runtime.py plugins/autorun/tests/test_hook_entry.py plugins/autorun/tests/test_hooks_format.py plugins/autorun/tests/test_bootstrap_config.py plugins/autorun/tests/test_actual_command_blocking.py -v`
-4. **Run full suite**: `uv run --project plugins/autorun --locked pytest plugins/autorun/tests/ -v`
-5. **Verify config loads**: `uv run --project plugins/autorun --locked python -c "from autorun.config import DEFAULT_INTEGRATIONS; print(len(DEFAULT_INTEGRATIONS))"`
-
-Every command in this checklist passes `--locked`. It is the same rule
-`.github/workflows/ci.yml` follows and
-`test_documentation_consistency.py::test_every_release_gate_environment_is_the_locked_one`
-enforces on both files: a candidate is validated against the graph `uv.lock`
-commits, never against a fresh resolution that the release will not ship. A
-command that must run outside the lock has to say why, on the line.
-
-## Release Workflow
-
-Every public write below is marked **RELEASER**. Do not push, tag, or create a
-GitHub release while preparing a candidate on someone else's behalf.
-
-### Stage 1: Version bump
-Follow the file lists above and commit locally. Do not push yet.
-
-### Stage 2: Pre-flight checks
-```bash
-# Capture one candidate commit and require every later check to name it.
-release_sha=$(git rev-parse HEAD)
-git fetch origin main --tags
-test -z "$(git status --porcelain=v1)"
-
-# Run from the plugin directories, matching CI discovery/configuration.
-(cd plugins/autorun && uv run --project . --locked pytest tests/ -m "not tmux and not e2e and not release" -v)
-# The PDF tests stay with their plugin, but the code they import ships in the
-# autorun-ai distribution and `plugins/pdf-extractor` deliberately has no
-# pyproject.toml — so the environment must come from the autorun project, with
-# `--extra pdf` for the backends. Running it as its own project resolves the
-# workspace root instead and collects four `ModuleNotFoundError: pdf_extraction`.
-uv run --project plugins/autorun --locked --extra pdf pytest plugins/pdf-extractor/tests/ -v
-(cd plugins/autorun && uv run --project . --locked pytest tests/test_release_artifacts.py -m release -v)
-(cd plugins/autorun && AUTORUN_ENABLE_STATE_BENCHMARK=1 uv run --project . --locked pytest tests/test_state_store_benchmark.py -m benchmark -v)
-# ─────────────────────────────────────────────────────────────────────────────
-# LIVE INSTALL BOUNDARY. Everything above this line runs against the checkout
-# and a scratch home. The next command is the one exception in this checklist:
-# it publishes the candidate to every harness detected on THIS machine and
-# restarts nothing, so every session already attached keeps its old hook until
-# it restarts. Run it only as the releasing maintainer, on your own machine,
-# when you intend that. An agent must not run it without your written
-# instruction in the current conversation naming this command — see the
-# isolation rule in AGENTS.md §1, which governs every other install here.
-#
-# It exists because the harness loads the plugin *cache*, not the source, so a
-# fix to hooks/hook_entry.py or hooks/hooks.json that never reaches the cache is
-# invisible: the live hook keeps running the previous file with nothing to say
-# so. The opt-in check below is what reads the cache, and it is meaningless
-# without this. To rehearse instead of committing, run the same command with
-# HOME, USERPROFILE, PI_CODING_AGENT_DIR, AUTORUN_HOME and
-# AUTORUN_TEST_STATE_DIR redirected to a scratch tree, as the marketplace
-# rehearsal in Stage 4 does, and skip the cache check.
-uv run --project plugins/autorun --locked python -m autorun --install --force
-# ─────────────────────────────────────────────────────────────────────────────
-# Hook configuration is read once at session start, so a hook change takes
-# effect in the NEXT session, not this one.
-
-# Opt-in, and only meaningful after that reinstall: confirms the Claude plugin
-# cache and the installed Gemini extension actually carry the hook files in
-# this tree. Skipped by default so an ordinary source edit does not fail the
-# suite before the reinstall.
-(cd plugins/autorun && AUTORUN_ENABLE_LIVE_INSTALL_CHECKS=1 uv run --project . --locked pytest tests/test_hook_entry.py -k "cache_matches_source or gemini_extension_hooks_match" -v)
-
-# No existing tag for this version
-git tag -l 'vX.Y.Z'                    # expect empty
-git ls-remote --tags origin vX.Y.Z     # expect empty
-```
-
-Rehearse the marketplace install from the exact candidate checkout, never the
-live home. This validates what a fresh Claude install will copy without waiting
-for the tag. Keep the scratch directory until its files have been inspected.
-
-```bash
-scratch_root=$(mktemp -d "${TMPDIR:-/tmp}/autorun-rc1.XXXXXX")
-mkdir -p "$scratch_root/home"
-git worktree add --detach "$scratch_root/checkout" "$release_sha"
-env HOME="$scratch_root/home" USERPROFILE="$scratch_root/home" \
-  CLAUDE_CONFIG_DIR="$scratch_root/home/.claude" \
-  AUTORUN_HOME="$scratch_root/autorun-home" \
-  AUTORUN_TEST_STATE_DIR="$scratch_root/state" \
-  claude plugin marketplace add "$scratch_root/checkout" --scope user
-env HOME="$scratch_root/home" USERPROFILE="$scratch_root/home" \
-  CLAUDE_CONFIG_DIR="$scratch_root/home/.claude" \
-  AUTORUN_HOME="$scratch_root/autorun-home" \
-  AUTORUN_TEST_STATE_DIR="$scratch_root/state" \
-  claude plugin install ar@autorun --scope user
-env HOME="$scratch_root/home" USERPROFILE="$scratch_root/home" \
-  CLAUDE_CONFIG_DIR="$scratch_root/home/.claude" \
-  claude plugin list
-find "$scratch_root" -type f -print | sort
-```
-
-The inventory must contain the registered `ar@autorun` plugin and must not
-contain `.coverage`, `coverage.xml`, `htmlcov`, `.ruff_cache`, or a development
-`.venv` copied from the checkout. Claude may create and own a managed `.venv`
-later; the installer must preserve that runtime. Do not point this rehearsal at
-`~/.claude`, `~/.codex`, or a running daemon's state directory. After inspecting
-the result, detach it with `git worktree remove "$scratch_root/checkout"` before
-discarding the scratch directory.
-
-### Stage 3: Push the candidate and wait for CI — **RELEASER public write**
-
-```bash
-git push origin "$release_sha":main
-git fetch origin main
-test "$(git rev-parse origin/main)" = "$release_sha"
-```
-
-The GitHub-backed Claude marketplace follows the repository's default branch,
-not a release asset. Requiring `origin/main`, the CI run, and the later tag to
-name the same SHA keeps a fresh marketplace install identical to the RC.
-
-All eleven jobs must be green, not just the matrix. The seven-entry matrix
-covers Python 3.10-3.14 on Ubuntu plus macOS 3.13 and Windows 3.13; four more
-run once each: `coverage` (75% floor), `release-artifacts` (`-m release`),
-`tmux-integration` (`-m tmux`), and `state-benchmark` (`-m benchmark`). Those
-four are the only place their markers run, since the matrix deselects them.
-
-Two failure shapes are worth recognising before reading logs. A job that dies
-in "Install dependencies" with "Unable to find lockfile at `uv.lock`" means the
-lockfile is missing from the checkout, not that a dependency broke. A job whose
-JUnit XML never appears, with a `+++ Timeout +++` stack dump instead of a test
-summary, hit the global per-test timeout in `pyproject.toml`: pytest-timeout
-kills the whole session, so the remaining tests never run and the first
-reported failure is the only one you get.
-
-```bash
-# Find the push run for the exact candidate, then verify its identity.
-run_id=$(gh run list --workflow ci.yml --commit "$release_sha" --event push \
-  --limit 1 --json databaseId --jq '.[0].databaseId')
-test -n "$run_id"
-test "$(gh run view "$run_id" --json headSha --jq .headSha)" = "$release_sha"
-
-# Wait for completion and require all eleven expanded jobs to succeed.
-gh run watch "$run_id" --exit-status
-test "$(gh run view "$run_id" --json jobs --jq '.jobs | length')" = 11
-test "$(gh run view "$run_id" --json jobs --jq \
-  '[.jobs[] | select(.conclusion != "success")] | length')" = 0
-
-# If it fails, check logs
-gh run view "$run_id" --log-failed
-```
-
-The workflow file is part of the release trust boundary. Every external
-`uses:` reference must remain pinned to a full 40-character commit SHA; the
-trailing version comment is for humans.
-
-## PyPI prerelease setup
-
-`.github/workflows/publish.yml` uploads one distribution with Trusted
-Publishing (OIDC). No API token is stored anywhere.
-
-| Distribution | Source directory | Installs as |
-|--------------|------------------|-------------|
-| `autorun-ai` | `plugins/autorun` | `uv tool install autorun-ai`, or `'autorun-ai[pdf]'` for PDF extraction |
-
-There is no second package. `plugins/pdf-extractor` is a plugin in every
-harness — its own manifest, command, and skill — while its code ships inside
-this wheel as `pdf_extraction` behind the `pdf` extra.
-`test_documentation_consistency.py::test_the_pdf_plugin_ships_inside_autorun_and_not_beside_it`
-holds that in place, and the publish workflow fails the build if the wheel stops
-carrying `pdf_extraction`, `extract-pdfs`, or the pdf extras.
-
-### One-time setup — **RELEASER, account access required**
-
-Two registrations are required: one project on each of two indexes. Until the
-first upload, register the project as a pending publisher
-([PyPI documentation](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)).
-
-At <https://test.pypi.org/manage/account/publishing/> and
-<https://pypi.org/manage/account/publishing/>, add a pending publisher for
-`autorun` with:
-
-| Field | Value |
-|-------|-------|
-| Owner | `ahundt` |
-| Repository | `autorun` |
-| Workflow | `publish.yml` |
-| Environment | `testpypi` on TestPyPI, `pypi` on PyPI |
-
-Create `testpypi` and `pypi` under GitHub Settings -> Environments. Give `pypi`
-a required reviewer so a tag push cannot reach the real index unattended;
-`testpypi` needs no protection. Confirm both environments before rehearsal:
-
-```bash
-names=$(gh api repos/ahundt/autorun/environments --jq \
-  '[.environments[].name] | sort | join(" ")')
-test "$names" = "pypi testpypi"
-```
-
-The GitHub API cannot confirm pending-publisher records on PyPI. The releaser
-must verify both records in the two account pages before continuing.
-
-### Rehearse on TestPyPI before any tag
-
-Run this only after Stage 3 has pushed `publish.yml` and exact-SHA CI is green.
-`workflow_dispatch` builds and publishes to TestPyPI only; its
-`testpypi_only` input defaults to true, so the rehearsal cannot reach PyPI:
-
-```bash
-gh workflow run publish.yml --ref main
-```
-
-Require the workflow to succeed, then install it both ways in throwaway tool
-directories so the rehearsal cannot disturb the installed CLIs. Install the
-plain form too: it is the one that proves no extraction library is required.
-
-```bash
-UV_TOOL_DIR=$(mktemp -d) UV_TOOL_BIN_DIR=$(mktemp -d) \
-  uv tool install --index-url https://test.pypi.org/simple/ \
-  --extra-index-url https://pypi.org/simple/ autorun-ai
-UV_TOOL_DIR=$(mktemp -d) UV_TOOL_BIN_DIR=$(mktemp -d) \
-  uv tool install --index-url https://test.pypi.org/simple/ \
-  --extra-index-url https://pypi.org/simple/ 'autorun-ai[pdf]'
-```
-
-TestPyPI refuses a re-upload of an existing file. The workflow passes
-`skip-existing: true` there so an identical rerun succeeds; PyPI remains strict.
-A changed artifact needs a new version and a complete restart from Stage 1.
-
-### Stage 4: Tag and push — **RELEASER public write**
-
-Derive the tag from the declared version instead of typing it. `v1.0.0-rc1` for
-`1.0.0rc1` is a plausible slip, and a wrong tag on a public repository is one of
-the writes the recovery table below says to stop on rather than correct in
-place. `test_every_release_identity_field_declares_the_same_version` separately
-guarantees that every manifest agrees with the field read here, so one substitution
-covers them all.
-
-```bash
-test "$(git rev-parse HEAD)" = "$release_sha"
-release_version=$(rg -N -o -r '$1' '^version = "(.+)"' plugins/autorun/pyproject.toml)
-test -n "$release_version"
-release_tag="v$release_version"
-
-git tag -a "$release_tag" "$release_sha" -m "autorun $release_tag"
-git push origin "$release_tag"
-```
-
-### Stage 5: Verify tag is on the right commit
-```bash
-test "$(git rev-list -n 1 "$release_tag")" = "$release_sha"
-test "$(git ls-remote origin "refs/tags/$release_tag^{}" | cut -f1)" = "$release_sha"
-```
-
-### Stage 6: Create GitHub prerelease — **RELEASER public write**
-
-The `--prerelease` flag is part of updater correctness. It governs **self-update
-only**: `installer/entrypoint.py` sets `allow_prerelease` from whether the
-*installed* version contains a letter, then filters candidates on the release's
-`prerelease` field, so an RC published without the flag is offered to stable
-installs as an ordinary upgrade.
-
-It does not govern fresh installs, and that is expected rather than a marking
-failure. `claude plugin marketplace add` follows the default branch, so a fresh
-install takes whatever `main` holds regardless of any release flag. Both halves
-are true at once: a stable user is not pulled onto an RC by the updater, while
-anyone installing from scratch during an RC window gets the RC.
-
-Use the reviewed release draft, not generated notes, and make retries idempotent
-by inspecting first.
-
-```bash
-if gh release view "$release_tag" >/dev/null 2>&1; then
-  gh release view "$release_tag" --json tagName,isDraft,isPrerelease,url
-else
-  gh release create "$release_tag" --verify-tag --prerelease \
-    --title "autorun $release_tag" \
-    --notes-file docs/releases/1.0.0rc1.md
-fi
-test "$(gh release view "$release_tag" --json isPrerelease --jq .isPrerelease)" = true
-test "$(gh release view "$release_tag" --json isDraft --jq .isDraft)" = false
-```
-
-### Stage 7: Verify the published release from the public install path
-
-Stage 2's rehearsal installs from a local worktree, which is the right pre-tag
-check but is not the command the release notes give users. Run that command
-against the published state, in a scratch `HOME`, never `~/.claude`:
-
-```bash
-verify_root=$(mktemp -d "${TMPDIR:-/tmp}/autorun-verify.XXXXXX")
-mkdir -p "$verify_root/home"
-env HOME="$verify_root/home" USERPROFILE="$verify_root/home" \
-  CLAUDE_CONFIG_DIR="$verify_root/home/.claude" \
-  AUTORUN_HOME="$verify_root/autorun-home" \
-  AUTORUN_TEST_STATE_DIR="$verify_root/state" \
-  claude plugin marketplace add https://github.com/ahundt/autorun.git --scope user
-env HOME="$verify_root/home" USERPROFILE="$verify_root/home" \
-  CLAUDE_CONFIG_DIR="$verify_root/home/.claude" \
-  AUTORUN_HOME="$verify_root/autorun-home" \
-  AUTORUN_TEST_STATE_DIR="$verify_root/state" \
-  claude plugin install ar@autorun --scope user
-```
-
-The installed plugin's version must equal `$release_version`, and the plugin
-must register as `ar` in marketplace `autorun`. Remove the scratch directory once
-its contents have been inspected.
-
-### Recovery table
-
-| State | Recovery |
-|---|---|
-| Before the tag is pushed | Delete/recreate the local tag after the fix and repeat every exact-SHA gate. |
-| Remote tag exists, GitHub release absent | Stop. Do not move or delete the remote tag; fix on `main` and issue the next RC version. |
-| GitHub prerelease exists and is correct | Treat a retry as success; verify its tag, commit, draft flag, and prerelease flag. |
-| GitHub prerelease exists but content or artifacts are wrong | Do not replace immutable code under the tag. Correct prose in place only when code is unchanged; otherwise issue the next RC version. |
-| Any public step partially succeeds | Inventory remote tag and release state before retrying. Never assume a failed command made no public write. |
+These are minimum versions. Bump them only for breaking changes, not patch releases. See Gotcha #3.
 
 ## PyPI tag publication
 

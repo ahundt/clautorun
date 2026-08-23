@@ -6,7 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are the plugin versions in `.claude-plugin/marketplace.json`; the
 marketplace itself carries a separate `version` field.
 
-## [1.0.0rc1] - 2026-08-20
+## [1.0.0rc1] - 2026-08-22
 
 ### Fixed
 

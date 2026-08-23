@@ -1037,8 +1037,11 @@ def test_each_autorun_spelling_keeps_its_own_job():
     `[tool.uv.sources]` it silently resolves the workspace member from PyPI
     instead of the local tree).
     """
-    import tomllib
-
+    # No local `import tomllib`: this module already binds it at the top with a
+    # `tomli` fallback, because tomllib is not stdlib before 3.11. A function
+    # scope import re-runs the real import and raises ModuleNotFoundError on
+    # 3.10 regardless of that fallback, which is how this failed one CI job
+    # while every other Python passed.
     plugin = tomllib.loads(
         (PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )

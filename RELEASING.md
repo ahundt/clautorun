@@ -375,6 +375,19 @@ uv pip install --python "$sandbox/venv/bin/python" \
 env HOME="$sandbox/home" AUTORUN_HOME="$sandbox/ar-home" \
   "$sandbox/venv/bin/autorun" --version   # expect $release_version
 
+# Repeat against the sdist. The wheel is prebuilt, so installing it proves
+# nothing about the build backend, and this project's backend is the unusual
+# part: build_support.py reaches into the sibling pdf-extractor plugin to put
+# pdf_extraction inside the one distribution. Only an sdist install runs it, and
+# only these users hit it -- --no-binary, an unsupported platform, a policy that
+# forbids wheels.
+uv venv --python 3.13 "$sandbox/sdist-venv"
+uv pip install --python "$sandbox/sdist-venv/bin/python" \
+  --index-url https://test.pypi.org/simple/ \
+  --extra-index-url https://pypi.org/simple/ \
+  --no-binary autorun-ai "autorun-ai==$release_version"
+"$sandbox/sdist-venv/bin/python" -c "import autorun, pdf_extraction"
+
 # What is pending, and whether you may approve it.
 gh api "repos/ahundt/autorun/actions/runs/$run_id/pending_deployments" \
   --jq '.[] | {environment: .environment.name, can_approve: .current_user_can_approve}'
